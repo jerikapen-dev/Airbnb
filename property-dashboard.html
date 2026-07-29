@@ -278,9 +278,10 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       var actualCostRaw=pick(r,['actual cost','contractor cost','cost paid','actual']);
       var actualCost=actualCostRaw ? Number(actualCostRaw.toString().replace(/[^0-9.\-]/g,'')) : null;
       var category=pick(r,['category','type'])||'Other';
+      var item=pick(r,['item','supply','product']);
       var note=pick(r,['note','notes','description']);
       if(!propertyId||!date){skipped++;return;}
-      expenses.push({id:uid(),propertyId:propertyId,category:category,amount:amount,actualCost:actualCost,date:date,note:note});
+      expenses.push({id:uid(),propertyId:propertyId,category:category,item:item,amount:amount,actualCost:actualCost,date:date,note:note});
       added++;
     });
     if(added>0)save('expenses',expenses);
@@ -538,6 +539,27 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       vacBox.appendChild(el('div',{style:'font-size:12px;color:var(--ink)'},[vacancies.map(function(p){return propShort(p.id);}).join(', ')]));
       panel.appendChild(vacBox);
     }
+
+    var ytd=ytdTotals();
+    panel.appendChild(el('div',{class:'section-title'},['Year to date \u2014 '+ytd.year]));
+    var ytdMetrics=el('div',{class:'metrics',style:'padding:0 0 20px;grid-template-columns:repeat(3,1fr);border-bottom:none'});
+    ytdMetrics.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},['Revenue']),el('div',{class:'val mono'},[fmt(ytd.rev)])]));
+    ytdMetrics.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},['Expenses']),el('div',{class:'val mono'},[fmt(ytd.exp)])]));
+    ytdMetrics.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},['Net']),el('div',{class:'val mono',style:ytd.net<0?'color:var(--rust)':''},[fmt(ytd.net)])]));
+    panel.appendChild(ytdMetrics);
+
+    panel.appendChild(el('div',{class:'section-title'},['Pick a month']));
+    var monthPickRow=el('div',{class:'row',style:'display:flex;gap:10px;align-items:flex-end;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px'});
+    var overviewMonthInp=el('input',{type:'month',value:overviewSelectedMonth});
+    overviewMonthInp.addEventListener('change',function(){overviewSelectedMonth=overviewMonthInp.value||thisMonth();render();});
+    monthPickRow.appendChild(el('div',{class:'field'},[el('label',{},['Month']),overviewMonthInp]));
+    panel.appendChild(monthPickRow);
+    var pickedTotals=monthAllPropsTotals(overviewSelectedMonth);
+    var pickedMetrics=el('div',{class:'metrics',style:'padding:0 0 20px;grid-template-columns:repeat(3,1fr);border-bottom:none'});
+    pickedMetrics.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},['Revenue']),el('div',{class:'val mono'},[fmt(pickedTotals.rev)])]));
+    pickedMetrics.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},['Expenses']),el('div',{class:'val mono'},[fmt(pickedTotals.exp)])]));
+    pickedMetrics.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},['Net']),el('div',{class:'val mono',style:pickedTotals.net<0?'color:var(--rust)':''},[fmt(pickedTotals.net)])]));
+    panel.appendChild(pickedMetrics);
 
     panel.appendChild(el('div',{class:'section-title'},['Property performance \u2014 '+thisMonth()]));
     if(props.length===0){
@@ -812,6 +834,41 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
         p.cleanerIndex=Number(cSel.value);
         save('properties',props); render();
       });
+
+      var byDayCheck=el('input',{type:'checkbox',style:'width:16px;height:16px;min-height:auto'});
+      byDayCheck.checked = !!(p.cleanerSchedule && p.cleanerSchedule.length===7);
+      byDayCheck.addEventListener('change',function(){
+        if(byDayCheck.checked){
+          var base = p.cleanerIndex!==undefined ? p.cleanerIndex : 0;
+          p.cleanerSchedule = p.cleanerSchedule && p.cleanerSchedule.length===7 ? p.cleanerSchedule : [base,base,base,base,base,base,base];
+        } else {
+          delete p.cleanerSchedule;
+        }
+        save('properties',props); render();
+      });
+
+      var cleanerCell=el('div',{style:'min-width:170px'});
+      cleanerCell.appendChild(el('label',{style:'display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-bottom:6px'},[byDayCheck,'Vary by day of week']));
+      if(byDayCheck.checked){
+        var dayLabels=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        var dayGrid=el('div',{style:'display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center'});
+        dayLabels.forEach(function(dLabel,dIdx){
+          var daySel=el('select',{style:'min-height:32px;padding:4px 6px;font-size:12px'});
+          cleaners.forEach(function(name,cIdx){daySel.appendChild(el('option',{value:cIdx},[name]));});
+          daySel.value = (p.cleanerSchedule && p.cleanerSchedule[dIdx]!==undefined && p.cleanerSchedule[dIdx]!==null) ? p.cleanerSchedule[dIdx] : 0;
+          daySel.addEventListener('change',function(){
+            p.cleanerSchedule = p.cleanerSchedule && p.cleanerSchedule.length===7 ? p.cleanerSchedule : [0,0,0,0,0,0,0];
+            p.cleanerSchedule[dIdx]=Number(daySel.value);
+            save('properties',props); render();
+          });
+          dayGrid.appendChild(el('div',{style:'font-size:11px;color:var(--muted)'},[dLabel]));
+          dayGrid.appendChild(daySel);
+        });
+        cleanerCell.appendChild(dayGrid);
+      } else {
+        cleanerCell.appendChild(cSel);
+      }
+
       tb.appendChild(el('tr',{},[
         el('td',{},[nameInp]),
         el('td',{},[shortInp]),
@@ -819,7 +876,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
         el('td',{},[turnoverInp,turnoverList]),
         el('td',{},[feeSel]),
         el('td',{},[cleanFeeInp,cleanFeeList]),
-        el('td',{},[cSel]),
+        el('td',{},[cleanerCell]),
         el('td',{},[el('button',{class:'small ghost',onclick:function(){
           props=props.filter(function(x){return x.id!==p.id;});
           save('properties',props); render();
@@ -984,22 +1041,24 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       ev.preventDefault();
       var propertyId=form.querySelector('[name=propertyId]').value;
       var category=form.querySelector('[name=category]').value.trim();
+      var item=form.querySelector('[name=item]').value.trim();
       var amount=form.querySelector('[name=amount]').value;
       var actualCost=form.querySelector('[name=actualCost]').value;
       var date=form.querySelector('[name=date]').value;
       var note=form.querySelector('[name=note]').value.trim();
       if(!propertyId||!category||!date)return;
-      expenses.push({id:uid(),propertyId:propertyId,category:category,amount:Number(amount||0),actualCost:actualCost?Number(actualCost):null,date:date,note:note});
+      expenses.push({id:uid(),propertyId:propertyId,category:category,item:item,amount:Number(amount||0),actualCost:actualCost?Number(actualCost):null,date:date,note:note});
       save('expenses',expenses);
       form.reset();
       render();
     }});
     var propSel=propSelect('propertyId');
-    var categorySel=(function(){var s=el('select',{name:'category'});['Management fee','Cleaning','Deep cleaning','Grease trap','Aircon cleaning','Repairs','Replacement item','RPT','Staging/setup','Utilities','Other'].forEach(function(o){s.appendChild(el('option',{value:o},[o]));});return s;})();
+    var categorySel=(function(){var s=el('select',{name:'category'});['Management fee','Toiletries','Cleaning','Deep cleaning','Grease trap','Aircon cleaning','Repairs','Replacement item','RPT','Staging/setup','Utilities','Other'].forEach(function(o){s.appendChild(el('option',{value:o},[o]));});return s;})();
     var amountInp=el('input',{name:'amount',type:'number',step:'1',placeholder:'0'});
 
     form.appendChild(el('div',{class:'field'},[el('label',{},['Property']),propSel]));
     form.appendChild(el('div',{class:'field'},[el('label',{},['Category']),categorySel]));
+    form.appendChild(el('div',{class:'field'},[el('label',{},['Item (e.g. Shampoo, Soap, Tissue, Trash bags)']),el('input',{name:'item',placeholder:'What exactly was bought'})]));
     form.appendChild(el('div',{class:'field'},[el('label',{},['Amount charged to owner (\u20B1)']),amountInp]));
     form.appendChild(el('div',{class:'field'},[el('label',{},['Actual cost paid to contractor (\u20B1, optional)']),el('input',{name:'actualCost',type:'number',step:'1',placeholder:'leave blank if none'})]));
     form.appendChild(el('div',{class:'field'},[el('label',{},['Date']),el('input',{name:'date',type:'date'})]));
@@ -1007,7 +1066,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     form.appendChild(el('button',{type:'submit'},['Add expense']));
     panel.appendChild(form);
     panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin:-10px 0 16px'},[
-      'For Repairs and Replacement item: \u201cAmount charged to owner\u201d is what shows on the owner report; \u201cActual cost\u201d (what you actually paid) is used to calculate your own margin on the My Earnings tab. Cleaning & laundry fees don\u2019t need to be logged here anymore \u2014 they\u2019re calculated automatically per checkout on the Cleaning Schedule tab.'
+      'For Repairs, Replacement item, and Toiletries: \u201cAmount charged to owner\u201d is what shows on the owner report; \u201cActual cost\u201d (what you actually paid) is used to calculate your own margin on the My Earnings tab. For Toiletries, always fill in \u201cItem\u201d (shampoo, soap, tissue, trash bags, etc.) so you can track which supplies run out fastest. Cleaning & laundry fees don\u2019t need to be logged here anymore \u2014 they\u2019re calculated automatically per checkout on the Cleaning Schedule tab.'
     ]));
 
     var importRow=el('div',{style:'display:flex;align-items:center;gap:10px;margin-bottom:16px;font-size:12px;color:var(--muted)'});
@@ -1032,13 +1091,14 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     var sorted=expenses.slice().sort(function(a,b){return b.date.localeCompare(a.date);});
     var tbl=el('table');
     tbl.appendChild(el('thead',{},[el('tr',{},[
-      el('th',{},['Property']),el('th',{},['Category']),el('th',{},['Date']),el('th',{},['Amount']),el('th',{},['Actual cost']),el('th',{},['Note']),el('th',{},[''])
+      el('th',{},['Property']),el('th',{},['Category']),el('th',{},['Item']),el('th',{},['Date']),el('th',{},['Amount']),el('th',{},['Actual cost']),el('th',{},['Note']),el('th',{},[''])
     ])]));
     var tb=el('tbody');
     sorted.forEach(function(e){
       tb.appendChild(el('tr',{},[
         el('td',{},[propShort(e.propertyId)]),
         el('td',{},[e.category]),
+        el('td',{},[e.item||'\u2014']),
         el('td',{class:'mono'},[e.date]),
         el('td',{class:'mono'},[fmt(e.amount)]),
         el('td',{class:'mono'},[(e.actualCost!==undefined&&e.actualCost!==null)?fmt(e.actualCost):'\u2014']),
@@ -1052,6 +1112,38 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     tbl.appendChild(tb);
     var scrollWrap=el('div',{class:'table-scroll'},[tbl]);
     panel.appendChild(scrollWrap);
+
+    var toiletryExpenses=expenses.filter(function(e){return e.category==='Toiletries' && e.item;});
+    if(toiletryExpenses.length>0){
+      panel.appendChild(el('div',{class:'section-title',style:'margin-top:28px'},['Toiletries usage \u2014 by item']));
+      panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin-bottom:12px'},[
+        'How often each supply gets bought and how much it costs \u2014 higher purchase counts usually mean it runs out faster.'
+      ]));
+      var itemGroups={};
+      toiletryExpenses.forEach(function(e){
+        var key=e.item.trim().toLowerCase();
+        itemGroups[key]=itemGroups[key]||{item:e.item.trim(),count:0,total:0,lastDate:''};
+        itemGroups[key].count++;
+        itemGroups[key].total+=Number(e.amount||0);
+        if(e.date>itemGroups[key].lastDate) itemGroups[key].lastDate=e.date;
+      });
+      var itemRows=Object.keys(itemGroups).map(function(k){return itemGroups[k];}).sort(function(a,b){return b.count-a.count;});
+      var itemTbl=el('table');
+      itemTbl.appendChild(el('thead',{},[el('tr',{},[
+        el('th',{},['Item']),el('th',{},['Times bought']),el('th',{},['Total spent']),el('th',{},['Last bought'])
+      ])]));
+      var itemTb=el('tbody');
+      itemRows.forEach(function(r){
+        itemTb.appendChild(el('tr',{},[
+          el('td',{},[r.item]),
+          el('td',{class:'mono'},[String(r.count)]),
+          el('td',{class:'mono'},[fmt(r.total)]),
+          el('td',{class:'mono'},[r.lastDate])
+        ]));
+      });
+      itemTbl.appendChild(itemTb);
+      panel.appendChild(el('div',{class:'table-scroll'},[itemTbl]));
+    }
   }
 
   var reportPropertyId='ALL', reportMonth=thisMonth();
@@ -1070,7 +1162,8 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
 
   var EXPENSE_BUCKET={
     'Repairs':'maintenance', 'Grease trap':'maintenance', 'Aircon cleaning':'maintenance',
-    'Replacement item':'replacement'
+    'Replacement item':'replacement',
+    'Toiletries':'toiletries'
   };
   function bucketFor(category){ return EXPENSE_BUCKET[category] || 'other'; }
 
@@ -1092,18 +1185,18 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
 
     var cleaningLaundry = computeCleaningFeeForMonth(propertyId,mk);
 
-    var buckets={maintenance:0, replacement:0, other:0};
+    var buckets={maintenance:0, replacement:0, toiletries:0, other:0};
     exs.forEach(function(e){
       buckets[bucketFor(e.category)] += Number(e.amount||0);
     });
 
-    var totalExp = cleaningLaundry + buckets.maintenance + buckets.replacement + buckets.other;
+    var totalExp = cleaningLaundry + buckets.maintenance + buckets.replacement + buckets.toiletries + buckets.other;
     var netOwner = gross - mgmtFee - totalExp;
     function pct(v){ return gross>0 ? (v/gross*100) : 0; }
     return {gross:gross, mgmtFee:mgmtFee, maintenance:buckets.maintenance, replacement:buckets.replacement,
-      other:buckets.other, cleaningLaundry:cleaningLaundry, totalExp:totalExp, netOwner:netOwner,
+      toiletries:buckets.toiletries, other:buckets.other, cleaningLaundry:cleaningLaundry, totalExp:totalExp, netOwner:netOwner,
       mgmtPct:pct(mgmtFee), maintenancePct:pct(buckets.maintenance), replacementPct:pct(buckets.replacement),
-      otherPct:pct(buckets.other), cleaningLaundryPct:pct(cleaningLaundry), totalExpPct:pct(totalExp)};
+      toiletriesPct:pct(buckets.toiletries), otherPct:pct(buckets.other), cleaningLaundryPct:pct(cleaningLaundry), totalExpPct:pct(totalExp)};
   }
 
   function computeMyEarnings(propertyId,mk){
@@ -1117,16 +1210,18 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       return sum + grossP*mgmtRateFor(p.id);
     },0);
 
-    var replacementBilled=0, replacementActual=0, maintenanceBilled=0, maintenanceActual=0;
+    var replacementBilled=0, replacementActual=0, maintenanceBilled=0, maintenanceActual=0, toiletriesBilled=0, toiletriesActual=0;
     exs.forEach(function(e){
       var bucket=bucketFor(e.category);
       var amt=Number(e.amount||0);
       var actual=(e.actualCost!==undefined && e.actualCost!==null) ? Number(e.actualCost) : amt;
       if(bucket==='replacement'){ replacementBilled+=amt; replacementActual+=actual; }
       else if(bucket==='maintenance'){ maintenanceBilled+=amt; maintenanceActual+=actual; }
+      else if(bucket==='toiletries'){ toiletriesBilled+=amt; toiletriesActual+=actual; }
     });
     var replacementMargin=replacementBilled-replacementActual;
     var maintenanceMargin=maintenanceBilled-maintenanceActual;
+    var toiletriesMargin=toiletriesBilled-toiletriesActual;
 
     // Cleaning fee (billed to owner) and turnover pay (owed to cleaner) both run off checkout date, same as the Cleaning Schedule
     var checkoutsInMonth = bookings.filter(function(b){return monthKey(b.checkOut)===mk && (propertyId==='ALL'||b.propertyId===propertyId);});
@@ -1137,10 +1232,11 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       turnoverPaid+=task.pay;
     });
 
-    var myEarnings = mgmtFee + cleaningLaundry + replacementMargin + maintenanceMargin - turnoverPaid;
+    var myEarnings = mgmtFee + cleaningLaundry + replacementMargin + maintenanceMargin + toiletriesMargin - turnoverPaid;
     return {gross:gross, mgmtFee:mgmtFee, cleaningLaundry:cleaningLaundry,
       replacementBilled:replacementBilled, replacementActual:replacementActual, replacementMargin:replacementMargin,
       maintenanceBilled:maintenanceBilled, maintenanceActual:maintenanceActual, maintenanceMargin:maintenanceMargin,
+      toiletriesBilled:toiletriesBilled, toiletriesActual:toiletriesActual, toiletriesMargin:toiletriesMargin,
       turnoverPaid:turnoverPaid, myEarnings:myEarnings};
   }
 
@@ -1181,6 +1277,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     card.appendChild(line('Management fee', -r.mgmtFee, r.mgmtPct));
     card.appendChild(line('Maintenance expenses', -r.maintenance, r.maintenancePct));
     card.appendChild(line('Replacement expenses', -r.replacement, r.replacementPct));
+    card.appendChild(line('Toiletries', -r.toiletries, r.toiletriesPct));
     card.appendChild(line('Other expenses', -r.other, r.otherPct));
     card.appendChild(line('Cleaning & laundry fee', -r.cleaningLaundry, r.cleaningLaundryPct));
 
@@ -1196,6 +1293,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       csv+='Management fee,'+(-r.mgmtFee).toFixed(2)+','+r.mgmtPct.toFixed(1)+'\n';
       csv+='Maintenance expenses,'+(-r.maintenance).toFixed(2)+','+r.maintenancePct.toFixed(1)+'\n';
       csv+='Replacement expenses,'+(-r.replacement).toFixed(2)+','+r.replacementPct.toFixed(1)+'\n';
+      csv+='Toiletries,'+(-r.toiletries).toFixed(2)+','+r.toiletriesPct.toFixed(1)+'\n';
       csv+='Other expenses,'+(-r.other).toFixed(2)+','+r.otherPct.toFixed(1)+'\n';
       csv+='Cleaning & laundry fee,'+(-r.cleaningLaundry).toFixed(2)+','+r.cleaningLaundryPct.toFixed(1)+'\n';
       csv+='Net payout to owner,'+r.netOwner.toFixed(2)+',\n';
@@ -1263,6 +1361,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     card.appendChild(line('Cleaning & laundry fee collected',r.cleaningLaundry,null,false));
     card.appendChild(line('Replacement margin', r.replacementMargin, '(\u20B1'+r.replacementBilled.toFixed(0)+' billed \u2212 \u20B1'+r.replacementActual.toFixed(0)+' paid)', false));
     card.appendChild(line('Maintenance margin', r.maintenanceMargin, '(\u20B1'+r.maintenanceBilled.toFixed(0)+' billed \u2212 \u20B1'+r.maintenanceActual.toFixed(0)+' paid)', false));
+    card.appendChild(line('Toiletries margin', r.toiletriesMargin, '(\u20B1'+r.toiletriesBilled.toFixed(0)+' billed \u2212 \u20B1'+r.toiletriesActual.toFixed(0)+' paid)', false));
     card.appendChild(line('Less: turnover pay to cleaners', -r.turnoverPaid, null, false));
 
     var netRow=el('div',{style:'display:flex;justify-content:space-between;align-items:baseline;padding:12px 0 0'});
@@ -1281,6 +1380,9 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       csv+='Maintenance billed,'+r.maintenanceBilled.toFixed(2)+'\n';
       csv+='Maintenance actual cost,'+r.maintenanceActual.toFixed(2)+'\n';
       csv+='Maintenance margin,'+r.maintenanceMargin.toFixed(2)+'\n';
+      csv+='Toiletries billed,'+r.toiletriesBilled.toFixed(2)+'\n';
+      csv+='Toiletries actual cost,'+r.toiletriesActual.toFixed(2)+'\n';
+      csv+='Toiletries margin,'+r.toiletriesMargin.toFixed(2)+'\n';
       csv+='Turnover pay to cleaners,-'+r.turnoverPaid.toFixed(2)+'\n';
       csv+='Your earnings,'+r.myEarnings.toFixed(2)+'\n';
       var blob=new Blob([csv],{type:'text/csv'});
@@ -1300,9 +1402,18 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     return CLEANING_FEE_DEFAULT;
   }
 
+  function defaultCleanerIndexFor(p,checkOutDate,i){
+    if(p && p.cleanerSchedule && p.cleanerSchedule.length===7){
+      var dow=new Date(checkOutDate+'T00:00:00').getDay(); // 0=Sun ... 6=Sat
+      var scheduled=p.cleanerSchedule[dow];
+      if(scheduled!==undefined && scheduled!==null && scheduled!=='') return Number(scheduled);
+    }
+    return (p&&p.cleanerIndex!==undefined&&p.cleanerIndex!==null) ? p.cleanerIndex : (i%cleaners.length);
+  }
+
   function buildCleaningTask(b,i){
     var p=props.find(function(x){return x.id===b.propertyId;});
-    var defaultIdx = (p&&p.cleanerIndex!==undefined&&p.cleanerIndex!==null) ? p.cleanerIndex : (i%cleaners.length);
+    var defaultIdx = defaultCleanerIndexFor(p,b.checkOut,i);
     var defaultPay = turnoverRateFor(b.propertyId);
     var pay = cleaningPayOverrides[b.id]!==undefined ? cleaningPayOverrides[b.id] : defaultPay;
     var defaultFee = cleaningFeeRateFor(b.propertyId);
