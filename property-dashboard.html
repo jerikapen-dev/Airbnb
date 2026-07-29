@@ -179,25 +179,26 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     return words.slice(0,2).join(' ').slice(0,16);
   }
 
+  function propAllNames(p){
+    var names=[p.name];
+    if(p.shortcut) names.push(p.shortcut);
+    if(p.aliases && p.aliases.length) names=names.concat(p.aliases);
+    return names.filter(Boolean).map(function(n){return n.toLowerCase();});
+  }
+
   function findPropertyId(name){
     if(!name)return null;
     var n=String(name).trim().toLowerCase();
-    var exact=props.find(function(p){return p.name.toLowerCase()===n;});
+    var exact=props.find(function(p){return propAllNames(p).indexOf(n)>-1;});
     if(exact)return exact.id;
-    var partial=props.find(function(p){return n.indexOf(p.name.toLowerCase())>-1||p.name.toLowerCase().indexOf(n)>-1;});
+    var partial=props.find(function(p){
+      return propAllNames(p).some(function(nm){return n.indexOf(nm)>-1||nm.indexOf(n)>-1;});
+    });
     return partial?partial.id:null;
   }
 
   function findPropertyIdByNameOrShortcut(input){
-    if(!input)return null;
-    var n=String(input).trim().toLowerCase();
-    var exact=props.find(function(p){return p.name.toLowerCase()===n || (p.shortcut&&p.shortcut.toLowerCase()===n);});
-    if(exact)return exact.id;
-    var partial=props.find(function(p){
-      var nm=p.name.toLowerCase(), sc=(p.shortcut||'').toLowerCase();
-      return n.indexOf(nm)>-1||nm.indexOf(n)>-1||(sc&&(n.indexOf(sc)>-1||sc.indexOf(n)>-1));
-    });
-    return partial?partial.id:null;
+    return findPropertyId(input);
   }
 
   function toISODate(v){
@@ -589,6 +590,27 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     }},['Download monthly summary CSV']));
   }
 
+  function mergeProperties(fromId,intoId){
+    if(!fromId||!intoId||fromId===intoId) return {merged:0};
+    var fromProp=props.find(function(p){return p.id===fromId;});
+    var intoProp=props.find(function(p){return p.id===intoId;});
+    if(!fromProp||!intoProp) return {merged:0};
+
+    var movedBookings=0, movedExpenses=0;
+    bookings.forEach(function(b){ if(b.propertyId===fromId){ b.propertyId=intoId; movedBookings++; } });
+    expenses.forEach(function(e){ if(e.propertyId===fromId){ e.propertyId=intoId; movedExpenses++; } });
+
+    intoProp.aliases = intoProp.aliases || [];
+    [fromProp.name, fromProp.shortcut].concat(fromProp.aliases||[]).forEach(function(n){
+      if(n && intoProp.aliases.indexOf(n)===-1 && n.toLowerCase()!==intoProp.name.toLowerCase()) intoProp.aliases.push(n);
+    });
+
+    props=props.filter(function(p){return p.id!==fromId;});
+
+    save('properties',props); save('bookings',bookings); save('expenses',expenses);
+    return {merged:1, movedBookings:movedBookings, movedExpenses:movedExpenses, fromName:fromProp.name, intoName:intoProp.name};
+  }
+
   function renderProperties(panel){
     panel.appendChild(el('div',{class:'section-title'},['Properties ('+props.length+')']));
     var form=el('form',{class:'row',onsubmit:function(ev){
@@ -681,6 +703,33 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       reader.readAsText(f);
     });
     panel.appendChild(cleanRateImportRow);
+
+    if(props.length>=2){
+      panel.appendChild(el('div',{style:'margin-top:8px;padding-top:16px;border-top:1px solid var(--line)'},[
+        el('div',{class:'section-title',style:'font-size:14px'},['Merge duplicate properties'])
+      ]));
+      panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin-bottom:10px'},[
+        'If a CSV import created a duplicate under a different listing name, merge it into the correct property. All its bookings and expenses move over, and the old name is remembered so future imports using that name match automatically.'
+      ]));
+      var mergeRow=el('div',{class:'row',style:'display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px'});
+      var fromSel=el('select',{});
+      props.forEach(function(p){fromSel.appendChild(el('option',{value:p.id},[p.name]));});
+      var intoSel=el('select',{});
+      props.forEach(function(p){intoSel.appendChild(el('option',{value:p.id},[p.name]));});
+      var mergeStatus=el('span',{style:'font-size:12px;color:var(--muted)'});
+      mergeRow.appendChild(el('div',{class:'field'},[el('label',{},['Merge this property (will be deleted)']),fromSel]));
+      mergeRow.appendChild(el('div',{class:'field'},[el('label',{},['Into this property (keeps its rates)']),intoSel]));
+      mergeRow.appendChild(el('button',{type:'button',onclick:function(){
+        if(fromSel.value===intoSel.value){ mergeStatus.textContent='Pick two different properties.'; render(); return; }
+        var fromP=props.find(function(p){return p.id===fromSel.value;});
+        var intoP=props.find(function(p){return p.id===intoSel.value;});
+        if(!confirm('Merge \u201c'+fromP.name+'\u201d into \u201c'+intoP.name+'\u201d? This moves all its bookings and expenses over, then deletes \u201c'+fromP.name+'\u201d. This can\u2019t be undone.')) return;
+        var res=mergeProperties(fromSel.value,intoSel.value);
+        render();
+      }},['Merge']));
+      mergeRow.appendChild(mergeStatus);
+      panel.appendChild(mergeRow);
+    }
 
     if(props.length===0){panel.appendChild(el('div',{class:'empty'},['No properties added yet.']));return;}
     var tbl=el('table');
@@ -817,16 +866,22 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     var filterRow=el('div',{class:'row',style:'display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px'});
     var searchInp=el('input',{value:bookingsSearchQuery,placeholder:'Guest name\u2026'});
     searchInp.addEventListener('change',function(){bookingsSearchQuery=searchInp.value;render();});
+    var propFilterSel=el('select',{});
+    propFilterSel.appendChild(el('option',{value:'ALL'},['All listings']));
+    props.forEach(function(p){propFilterSel.appendChild(el('option',{value:p.id},[(p.shortcut&&p.shortcut.trim()&&p.shortcut.trim()!==p.name)?(p.shortcut+' \u2014 '+p.name):p.name]));});
+    propFilterSel.value=bookingsFilterProperty;
+    propFilterSel.addEventListener('change',function(){bookingsFilterProperty=propFilterSel.value;render();});
     var fromInp=el('input',{type:'date',value:bookingsFilterFrom});
     fromInp.addEventListener('change',function(){bookingsFilterFrom=fromInp.value;render();});
     var toInp=el('input',{type:'date',value:bookingsFilterTo});
     toInp.addEventListener('change',function(){bookingsFilterTo=toInp.value;render();});
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Search guest']),searchInp]));
+    filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Listing']),propFilterSel]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Check-in from']),fromInp]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Check-in to']),toInp]));
-    if(bookingsSearchQuery||bookingsFilterFrom||bookingsFilterTo){
+    if(bookingsSearchQuery||bookingsFilterFrom||bookingsFilterTo||bookingsFilterProperty!=='ALL'){
       filterRow.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
-        bookingsSearchQuery='';bookingsFilterFrom='';bookingsFilterTo='';render();
+        bookingsSearchQuery='';bookingsFilterFrom='';bookingsFilterTo='';bookingsFilterProperty='ALL';render();
       }},['Clear filters']));
     }
     panel.appendChild(filterRow);
@@ -835,6 +890,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     var q=bookingsSearchQuery.trim().toLowerCase();
     var filtered=sorted.filter(function(b){
       if(q && b.guest.toLowerCase().indexOf(q)===-1) return false;
+      if(bookingsFilterProperty!=='ALL' && b.propertyId!==bookingsFilterProperty) return false;
       if(bookingsFilterFrom && b.checkIn<bookingsFilterFrom) return false;
       if(bookingsFilterTo && b.checkIn>bookingsFilterTo) return false;
       return true;
@@ -968,7 +1024,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
   var earningsPropertyId='ALL', earningsMonth=thisMonth();
   var payrollWeekStart=saturdayOnOrBefore(today());
   var payrollBreakdownMonth=thisMonth();
-  var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='';
+  var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='', bookingsFilterProperty='ALL';
   var bookingsSelected={};
   var dismissedConflicts={};
 
