@@ -365,6 +365,21 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     return conflicts;
   }
 
+  function duplicateBookingIds(){
+    var groups={};
+    bookings.forEach(function(b){
+      var key=(b.guest||'').trim().toLowerCase()+'|'+b.checkIn+'|'+b.checkOut+'|'+Number(b.amount||0).toFixed(2);
+      (groups[key]=groups[key]||[]).push(b);
+    });
+    var flagged={};
+    Object.keys(groups).forEach(function(key){
+      if(groups[key].length>1){
+        groups[key].forEach(function(b){ flagged[b.id]=groups[key].length; });
+      }
+    });
+    return flagged;
+  }
+
   function todaysCheckouts(){
     var t=today();
     return bookings.filter(function(b){return b.checkOut===t;});
@@ -818,6 +833,15 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
 
   function renderBookings(panel){
     panel.appendChild(el('div',{class:'section-title'},['Bookings']));
+    var dupFlags=duplicateBookingIds();
+    var dupCount=Object.keys(dupFlags).length;
+    if(dupCount>0){
+      var dupBox=el('div',{style:'background:var(--amber-l);border:1px solid var(--amber);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px'});
+      dupBox.appendChild(el('div',{style:'font-weight:600;color:var(--amber);font-size:13px'},[
+        '\u26a0 '+dupCount+' booking'+(dupCount===1?'':'s')+' with matching guest, dates, and amount \u2014 likely duplicate'+(dupCount===1?'':'s')+' from a repeated CSV import. Flagged below.'
+      ]));
+      panel.appendChild(dupBox);
+    }
     var form=el('form',{class:'row',onsubmit:function(ev){
       ev.preventDefault();
       var propertyId=form.querySelector('[name=propertyId]').value;
