@@ -249,7 +249,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     var added=0, skipped=0;
     rows.forEach(function(r){
       var propRaw=pick(r,['property','listing','property name','unit']);
-      var propertyId=findPropertyId(propRaw) || (props.length===1?props[0].id:null);
+      var propertyId=findPropertyIdByNameOrShortcut(propRaw) || (props.length===1?props[0].id:null);
       var checkIn=toISODate(pick(r,['check-in','checkin','start date','arrival']));
       var checkOut=toISODate(pick(r,['check-out','checkout','end date','departure']));
       // 'amount' = Airbnb's net payout after their service fee, and per your commission structure,
@@ -271,7 +271,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     var added=0, skipped=0;
     rows.forEach(function(r){
       var propRaw=pick(r,['property','listing','property name','unit']);
-      var propertyId=findPropertyId(propRaw) || (props.length===1?props[0].id:null);
+      var propertyId=findPropertyIdByNameOrShortcut(propRaw) || (props.length===1?props[0].id:null);
       var date=toISODate(pick(r,['date']));
       var amount=Number(pick(r,['amount','cost','total']).toString().replace(/[^0-9.\-]/g,''))||0;
       var actualCostRaw=pick(r,['actual cost','contractor cost','cost paid','actual']);
