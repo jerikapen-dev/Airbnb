@@ -129,11 +129,12 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
 
   function uid(){return Math.random().toString(36).slice(2,9);}
   function fmt(n){return (n<0?'-':'')+'\u20B1'+Math.abs(Math.round(n)).toLocaleString();}
-  function today(){return new Date().toISOString().slice(0,10);}
+  function isoLocal(d){var y=d.getFullYear(),m=d.getMonth()+1,day=d.getDate();return y+'-'+(m<10?'0':'')+m+'-'+(day<10?'0':'')+day;}
+  function today(){return isoLocal(new Date());}
   function monthKey(d){return d.slice(0,7);}
   function thisMonth(){return monthKey(today());}
-  function addDays(iso,n){var d=new Date(iso+'T00:00:00');d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);}
-  function addMonths(iso,n){var d=new Date(iso+'T00:00:00');d.setMonth(d.getMonth()+n);return d.toISOString().slice(0,10);}
+  function addDays(iso,n){var d=new Date(iso+'T00:00:00');d.setDate(d.getDate()+n);return isoLocal(d);}
+  function addMonths(iso,n){var d=new Date(iso+'T00:00:00');d.setMonth(d.getMonth()+n);return isoLocal(d);}
   function daysBetween(a,b){return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000);}
   function weekdayShort(iso){return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{weekday:'short'});}
   function triggerDownload(blob,filename){
@@ -205,7 +206,8 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     if(/^\d{4}-\d{2}-\d{2}/.test(v))return v.slice(0,10);
     var d=new Date(v);
     if(isNaN(d.getTime()))return '';
-    return d.toISOString().slice(0,10);
+    var y=d.getFullYear(), m=d.getMonth()+1, day=d.getDate();
+    return y+'-'+(m<10?'0':'')+m+'-'+(day<10?'0':'')+day;
   }
 
   function parseCSV(text){
@@ -401,7 +403,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     var t=new Date();
     var firstOfThisMonth=new Date(t.getFullYear(),t.getMonth(),1);
     var lastDayPrevMonth=new Date(firstOfThisMonth.getTime()-86400000);
-    return lastDayPrevMonth.toISOString().slice(0,7);
+    return isoLocal(lastDayPrevMonth).slice(0,7);
   }
 
   function monthsFromTo(startKey,endKey){
@@ -1233,7 +1235,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     var day=d.getDay(); // Sun=0 ... Sat=6
     var diff=(day+1)%7; // days since most recent Saturday
     d.setDate(d.getDate()-diff);
-    return d.toISOString().slice(0,10);
+    return isoLocal(d);
   }
 
   function computeCleaningTasksForWeek(weekStart){
