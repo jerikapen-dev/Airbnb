@@ -119,6 +119,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
   var cleaners=['Cleaner A','Cleaner B','Cleaner C','Cleaner D'];
   var cleaningOverrides={};
   var cleaningPayOverrides={};
+  var cleaningFeeOverrides={};
   var cleaningDone={};
   var TURNOVER_DEFAULTS={'Studio':400,'1BR':500,'2BR':700,'3BR':800};
   var TURNOVER_PRESETS=[400,500,700,750];
@@ -158,6 +159,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     try{var r4=await storage.get('cleaners');cleaners=r4?JSON.parse(r4.value):['Cleaner A','Cleaner B','Cleaner C','Cleaner D'];}catch(e){cleaners=['Cleaner A','Cleaner B','Cleaner C','Cleaner D'];}
     try{var r5=await storage.get('cleaningOverrides');cleaningOverrides=r5?JSON.parse(r5.value):{};}catch(e){cleaningOverrides={};}
     try{var r6=await storage.get('cleaningPayOverrides');cleaningPayOverrides=r6?JSON.parse(r6.value):{};}catch(e){cleaningPayOverrides={};}
+    try{var r9=await storage.get('cleaningFeeOverrides');cleaningFeeOverrides=r9?JSON.parse(r9.value):{};}catch(e){cleaningFeeOverrides={};}
     try{var r8=await storage.get('cleaningDone');cleaningDone=r8?JSON.parse(r8.value):{};}catch(e){cleaningDone={};}
     try{var r7=await storage.get('maintenanceIntervals');maintenanceIntervals=r7?JSON.parse(r7.value):{aircon:4,grease:1};}catch(e){maintenanceIntervals={aircon:4,grease:1};}
     loaded=true; render();
@@ -269,10 +271,12 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       var propertyId=findPropertyId(propRaw) || (props.length===1?props[0].id:null);
       var date=toISODate(pick(r,['date']));
       var amount=Number(pick(r,['amount','cost','total']).toString().replace(/[^0-9.\-]/g,''))||0;
+      var actualCostRaw=pick(r,['actual cost','contractor cost','cost paid','actual']);
+      var actualCost=actualCostRaw ? Number(actualCostRaw.toString().replace(/[^0-9.\-]/g,'')) : null;
       var category=pick(r,['category','type'])||'Other';
       var note=pick(r,['note','notes','description']);
       if(!propertyId||!date){skipped++;return;}
-      expenses.push({id:uid(),propertyId:propertyId,category:category,amount:amount,date:date,note:note});
+      expenses.push({id:uid(),propertyId:propertyId,category:category,amount:amount,actualCost:actualCost,date:date,note:note});
       added++;
     });
     if(added>0)save('expenses',expenses);
@@ -460,7 +464,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
   }
 
   function renderTabs(root){
-    var tabs=[['overview','Overview'],['properties','Properties'],['bookings','Bookings'],['expenses','Expenses'],['owner','Owner report'],['cleaning','Cleaning schedule'],['maintenance','Maintenance'],['backup','Backup']];
+    var tabs=[['overview','Overview'],['properties','Properties'],['bookings','Bookings'],['expenses','Expenses'],['owner','Owner report'],['earnings','My earnings'],['cleaning','Cleaning schedule'],['maintenance','Maintenance'],['backup','Backup']];
     var bar=el('div',{class:'tabs'});
     tabs.forEach(function(tb){
       bar.appendChild(el('div',{class:'tab'+(activeTab===tb[0]?' active':''),onclick:function(){activeTab=tb[0];render();}},[tb[1]]));
@@ -878,10 +882,11 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       var propertyId=form.querySelector('[name=propertyId]').value;
       var category=form.querySelector('[name=category]').value.trim();
       var amount=form.querySelector('[name=amount]').value;
+      var actualCost=form.querySelector('[name=actualCost]').value;
       var date=form.querySelector('[name=date]').value;
       var note=form.querySelector('[name=note]').value.trim();
       if(!propertyId||!category||!date)return;
-      expenses.push({id:uid(),propertyId:propertyId,category:category,amount:Number(amount||0),date:date,note:note});
+      expenses.push({id:uid(),propertyId:propertyId,category:category,amount:Number(amount||0),actualCost:actualCost?Number(actualCost):null,date:date,note:note});
       save('expenses',expenses);
       form.reset();
       render();
@@ -892,11 +897,15 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
 
     form.appendChild(el('div',{class:'field'},[el('label',{},['Property']),propSel]));
     form.appendChild(el('div',{class:'field'},[el('label',{},['Category']),categorySel]));
-    form.appendChild(el('div',{class:'field'},[el('label',{},['Amount (\u20B1)']),amountInp]));
+    form.appendChild(el('div',{class:'field'},[el('label',{},['Amount charged to owner (\u20B1)']),amountInp]));
+    form.appendChild(el('div',{class:'field'},[el('label',{},['Actual cost paid to contractor (\u20B1, optional)']),el('input',{name:'actualCost',type:'number',step:'1',placeholder:'leave blank if none'})]));
     form.appendChild(el('div',{class:'field'},[el('label',{},['Date']),el('input',{name:'date',type:'date'})]));
     form.appendChild(el('div',{class:'field'},[el('label',{},['Note']),el('input',{name:'note',placeholder:'Optional'})]));
     form.appendChild(el('button',{type:'submit'},['Add expense']));
     panel.appendChild(form);
+    panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin:-10px 0 16px'},[
+      'For Repairs and Replacement item: \u201cAmount charged to owner\u201d is what shows on the owner report; \u201cActual cost\u201d (what you actually paid) is used to calculate your own margin on the My Earnings tab. Cleaning & laundry fees don\u2019t need to be logged here anymore \u2014 they\u2019re calculated automatically per checkout on the Cleaning Schedule tab.'
+    ]));
 
     var importRow=el('div',{style:'display:flex;align-items:center;gap:10px;margin-bottom:16px;font-size:12px;color:var(--muted)'});
     var fileInput=el('input',{type:'file',accept:'.csv'});
@@ -920,7 +929,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     var sorted=expenses.slice().sort(function(a,b){return b.date.localeCompare(a.date);});
     var tbl=el('table');
     tbl.appendChild(el('thead',{},[el('tr',{},[
-      el('th',{},['Property']),el('th',{},['Category']),el('th',{},['Date']),el('th',{},['Amount']),el('th',{},['Note']),el('th',{},[''])
+      el('th',{},['Property']),el('th',{},['Category']),el('th',{},['Date']),el('th',{},['Amount']),el('th',{},['Actual cost']),el('th',{},['Note']),el('th',{},[''])
     ])]));
     var tb=el('tbody');
     sorted.forEach(function(e){
@@ -929,6 +938,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
         el('td',{},[e.category]),
         el('td',{class:'mono'},[e.date]),
         el('td',{class:'mono'},[fmt(e.amount)]),
+        el('td',{class:'mono'},[(e.actualCost!==undefined&&e.actualCost!==null)?fmt(e.actualCost):'\u2014']),
         el('td',{},[e.note||'\u2014']),
         el('td',{},[el('button',{class:'small ghost',onclick:function(){
           expenses=expenses.filter(function(x){return x.id!==e.id;});
@@ -942,6 +952,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
   }
 
   var reportPropertyId='ALL', reportMonth=thisMonth();
+  var earningsPropertyId='ALL', earningsMonth=thisMonth();
   var payrollWeekStart=saturdayOnOrBefore(today());
   var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='';
   var bookingsSelected={};
@@ -952,11 +963,15 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
   }
 
   var EXPENSE_BUCKET={
-    'Cleaning':'cleaningLaundry','Deep cleaning':'cleaningLaundry','Grease trap':'cleaningLaundry','Aircon cleaning':'cleaningLaundry',
-    'Repairs':'maintenance',
+    'Repairs':'maintenance', 'Grease trap':'maintenance', 'Aircon cleaning':'maintenance',
     'Replacement item':'replacement'
   };
   function bucketFor(category){ return EXPENSE_BUCKET[category] || 'other'; }
+
+  function computeCleaningFeeForMonth(propertyId,mk){
+    var checkoutsInMonth = bookings.filter(function(b){return monthKey(b.checkOut)===mk && (propertyId==='ALL'||b.propertyId===propertyId);});
+    return checkoutsInMonth.reduce(function(sum,b,i){ return sum + buildCleaningTask(b,i).ownerFee; },0);
+  }
 
   function computeOwnerReport(propertyId,mk){
     var relevantProps = propertyId==='ALL' ? props : props.filter(function(p){return p.id===propertyId;});
@@ -969,18 +984,58 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       return sum + grossP*mgmtRateFor(p.id);
     },0);
 
-    var buckets={cleaningLaundry:0, maintenance:0, replacement:0, other:0};
+    var cleaningLaundry = computeCleaningFeeForMonth(propertyId,mk);
+
+    var buckets={maintenance:0, replacement:0, other:0};
     exs.forEach(function(e){
       buckets[bucketFor(e.category)] += Number(e.amount||0);
     });
 
-    var totalExp = buckets.cleaningLaundry + buckets.maintenance + buckets.replacement + buckets.other;
+    var totalExp = cleaningLaundry + buckets.maintenance + buckets.replacement + buckets.other;
     var netOwner = gross - mgmtFee - totalExp;
     function pct(v){ return gross>0 ? (v/gross*100) : 0; }
     return {gross:gross, mgmtFee:mgmtFee, maintenance:buckets.maintenance, replacement:buckets.replacement,
-      other:buckets.other, cleaningLaundry:buckets.cleaningLaundry, totalExp:totalExp, netOwner:netOwner,
+      other:buckets.other, cleaningLaundry:cleaningLaundry, totalExp:totalExp, netOwner:netOwner,
       mgmtPct:pct(mgmtFee), maintenancePct:pct(buckets.maintenance), replacementPct:pct(buckets.replacement),
-      otherPct:pct(buckets.other), cleaningLaundryPct:pct(buckets.cleaningLaundry), totalExpPct:pct(totalExp)};
+      otherPct:pct(buckets.other), cleaningLaundryPct:pct(cleaningLaundry), totalExpPct:pct(totalExp)};
+  }
+
+  function computeMyEarnings(propertyId,mk){
+    var relevantProps = propertyId==='ALL' ? props : props.filter(function(p){return p.id===propertyId;});
+    var bks = bookings.filter(function(b){return monthKey(b.checkIn)===mk && (propertyId==='ALL'||b.propertyId===propertyId);});
+    var exs = expenses.filter(function(e){return monthKey(e.date)===mk && (propertyId==='ALL'||e.propertyId===propertyId);});
+    var gross = bks.reduce(function(s,b){return s+Number(b.amount||0);},0);
+
+    var mgmtFee = relevantProps.reduce(function(sum,p){
+      var grossP = bks.filter(function(b){return b.propertyId===p.id;}).reduce(function(s,b){return s+Number(b.amount||0);},0);
+      return sum + grossP*mgmtRateFor(p.id);
+    },0);
+
+    var replacementBilled=0, replacementActual=0, maintenanceBilled=0, maintenanceActual=0;
+    exs.forEach(function(e){
+      var bucket=bucketFor(e.category);
+      var amt=Number(e.amount||0);
+      var actual=(e.actualCost!==undefined && e.actualCost!==null) ? Number(e.actualCost) : amt;
+      if(bucket==='replacement'){ replacementBilled+=amt; replacementActual+=actual; }
+      else if(bucket==='maintenance'){ maintenanceBilled+=amt; maintenanceActual+=actual; }
+    });
+    var replacementMargin=replacementBilled-replacementActual;
+    var maintenanceMargin=maintenanceBilled-maintenanceActual;
+
+    // Cleaning fee (billed to owner) and turnover pay (owed to cleaner) both run off checkout date, same as the Cleaning Schedule
+    var checkoutsInMonth = bookings.filter(function(b){return monthKey(b.checkOut)===mk && (propertyId==='ALL'||b.propertyId===propertyId);});
+    var cleaningLaundry=0, turnoverPaid=0;
+    checkoutsInMonth.forEach(function(b,i){
+      var task=buildCleaningTask(b,i);
+      cleaningLaundry+=task.ownerFee;
+      turnoverPaid+=task.pay;
+    });
+
+    var myEarnings = mgmtFee + cleaningLaundry + replacementMargin + maintenanceMargin - turnoverPaid;
+    return {gross:gross, mgmtFee:mgmtFee, cleaningLaundry:cleaningLaundry,
+      replacementBilled:replacementBilled, replacementActual:replacementActual, replacementMargin:replacementMargin,
+      maintenanceBilled:maintenanceBilled, maintenanceActual:maintenanceActual, maintenanceMargin:maintenanceMargin,
+      turnoverPaid:turnoverPaid, myEarnings:myEarnings};
   }
 
   function renderOwnerReport(panel){
@@ -1066,6 +1121,67 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     panel.appendChild(syncRow);
   }
 
+  function renderMyEarnings(panel){
+    panel.appendChild(el('div',{class:'section-title'},['My earnings']));
+    panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin-bottom:16px;max-width:560px'},[
+      'What you actually keep: management fee + cleaning & laundry fee charged to owners, plus your margin on any replacement or maintenance work (amount charged to owner minus what you actually paid), minus what you pay your cleaners for turnovers.'
+    ]));
+    var controls=el('div',{class:'row',style:'display:flex;gap:12px;align-items:flex-end;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px'});
+    var pSel=el('select',{});
+    pSel.appendChild(el('option',{value:'ALL'},['All properties']));
+    props.forEach(function(p){pSel.appendChild(el('option',{value:p.id},[(p.shortcut&&p.shortcut.trim()&&p.shortcut.trim()!==p.name)?(p.shortcut+' \u2014 '+p.name):p.name]));});
+    pSel.value=earningsPropertyId;
+    pSel.addEventListener('change',function(){earningsPropertyId=pSel.value;render();});
+    var mInput=el('input',{type:'month',value:earningsMonth});
+    mInput.addEventListener('change',function(){earningsMonth=mInput.value||thisMonth();render();});
+    controls.appendChild(el('div',{class:'field'},[el('label',{},['Property']),pSel]));
+    controls.appendChild(el('div',{class:'field'},[el('label',{},['Month']),mInput]));
+    panel.appendChild(controls);
+
+    if(props.length===0){panel.appendChild(el('div',{class:'empty'},['Add properties to see your earnings.']));return;}
+
+    var r=computeMyEarnings(earningsPropertyId,earningsMonth);
+    var label = earningsPropertyId==='ALL' ? 'All properties' : propName(earningsPropertyId);
+
+    var card=el('div',{style:'background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 20px;max-width:560px'});
+    card.appendChild(el('div',{style:'font-family:Fraunces,serif;font-weight:600;font-size:16px;margin-bottom:2px'},[label]));
+    card.appendChild(el('div',{style:'color:var(--muted);font-size:12px;margin-bottom:14px'},[earningsMonth+' \u00b7 your earnings']));
+
+    function line(lbl,val,sub,strong){
+      var row=el('div',{style:'display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line);gap:10px'});
+      row.appendChild(el('div',{style:(strong?'font-weight:500;':'')+'font-size:13px'},[lbl+(sub?' ':''),sub?el('span',{style:'font-size:11px;color:var(--muted)'},[sub]):null]));
+      row.appendChild(el('div',{class:'mono',style:(strong?'font-weight:500;font-size:15px':'font-size:13px')},[fmt(val)]));
+      return row;
+    }
+    card.appendChild(line('Management fee collected',r.mgmtFee,null,false));
+    card.appendChild(line('Cleaning & laundry fee collected',r.cleaningLaundry,null,false));
+    card.appendChild(line('Replacement margin', r.replacementMargin, '(\u20B1'+r.replacementBilled.toFixed(0)+' billed \u2212 \u20B1'+r.replacementActual.toFixed(0)+' paid)', false));
+    card.appendChild(line('Maintenance margin', r.maintenanceMargin, '(\u20B1'+r.maintenanceBilled.toFixed(0)+' billed \u2212 \u20B1'+r.maintenanceActual.toFixed(0)+' paid)', false));
+    card.appendChild(line('Less: turnover pay to cleaners', -r.turnoverPaid, null, false));
+
+    var netRow=el('div',{style:'display:flex;justify-content:space-between;align-items:baseline;padding:12px 0 0'});
+    netRow.appendChild(el('div',{style:'font-weight:600;font-size:14px'},['Your earnings']));
+    netRow.appendChild(el('div',{class:'mono',style:'font-weight:600;font-size:18px;color:'+(r.myEarnings<0?'var(--rust)':'var(--green)')},[fmt(r.myEarnings)]));
+    card.appendChild(netRow);
+    panel.appendChild(card);
+
+    panel.appendChild(el('button',{class:'ghost',style:'margin-top:14px',onclick:function(){
+      var csv='Line,Amount\n';
+      csv+='Management fee collected,'+r.mgmtFee.toFixed(2)+'\n';
+      csv+='Cleaning & laundry fee collected,'+r.cleaningLaundry.toFixed(2)+'\n';
+      csv+='Replacement billed,'+r.replacementBilled.toFixed(2)+'\n';
+      csv+='Replacement actual cost,'+r.replacementActual.toFixed(2)+'\n';
+      csv+='Replacement margin,'+r.replacementMargin.toFixed(2)+'\n';
+      csv+='Maintenance billed,'+r.maintenanceBilled.toFixed(2)+'\n';
+      csv+='Maintenance actual cost,'+r.maintenanceActual.toFixed(2)+'\n';
+      csv+='Maintenance margin,'+r.maintenanceMargin.toFixed(2)+'\n';
+      csv+='Turnover pay to cleaners,-'+r.turnoverPaid.toFixed(2)+'\n';
+      csv+='Your earnings,'+r.myEarnings.toFixed(2)+'\n';
+      var blob=new Blob([csv],{type:'text/csv'});
+      triggerDownload(blob,'my-earnings-'+label.replace(/\s+/g,'-')+'-'+earningsMonth+'.csv');
+    }},['Download this report as CSV']));
+  }
+
   function turnoverRateFor(propertyId){
     var p=props.find(function(x){return x.id===propertyId;});
     if(p && p.turnoverRate!==undefined && p.turnoverRate!==null && p.turnoverRate!=='') return Number(p.turnoverRate);
@@ -1083,9 +1199,11 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     var defaultIdx = (p&&p.cleanerIndex!==undefined&&p.cleanerIndex!==null) ? p.cleanerIndex : (i%cleaners.length);
     var defaultPay = turnoverRateFor(b.propertyId);
     var pay = cleaningPayOverrides[b.id]!==undefined ? cleaningPayOverrides[b.id] : defaultPay;
+    var defaultFee = cleaningFeeRateFor(b.propertyId);
+    var ownerFee = cleaningFeeOverrides[b.id]!==undefined ? cleaningFeeOverrides[b.id] : defaultFee;
     return {
       id:b.id, date:b.checkOut, propertyId:b.propertyId, property:propShort(b.propertyId),
-      guest:b.guest, type: 'Turnover', pay: pay, done: !!cleaningDone[b.id],
+      guest:b.guest, type: 'Turnover', pay: pay, ownerFee: ownerFee, done: !!cleaningDone[b.id],
       cleanerIndex: cleaningOverrides[b.id]!==undefined ? cleaningOverrides[b.id] : defaultIdx
     };
   }
@@ -1160,7 +1278,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
 
     var tbl=el('table');
     tbl.appendChild(el('thead',{},[el('tr',{},[
-      el('th',{},['Done']),el('th',{},['Date']),el('th',{},['Day']),el('th',{},['Property']),el('th',{},['Departing guest']),el('th',{},['Pay (\u20B1)']),el('th',{},['Assigned to'])
+      el('th',{},['Done']),el('th',{},['Date']),el('th',{},['Day']),el('th',{},['Property']),el('th',{},['Departing guest']),el('th',{},['Pay to cleaner (\u20B1)']),el('th',{},['Owner fee (\u20B1)']),el('th',{},['Assigned to'])
     ])]));
     var tb=el('tbody');
     tasks.forEach(function(t){
@@ -1176,6 +1294,11 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
         cleaningPayOverrides[t.id]=Number(payInp.value||0);
         save('cleaningPayOverrides',cleaningPayOverrides); render();
       });
+      var feeInp=el('input',{type:'number',step:'1',value:t.ownerFee,style:'width:90px'});
+      feeInp.addEventListener('change',function(){
+        cleaningFeeOverrides[t.id]=Number(feeInp.value||0);
+        save('cleaningFeeOverrides',cleaningFeeOverrides); render();
+      });
       var doneCheck=el('input',{type:'checkbox',style:'width:20px;height:20px;min-height:auto'});
       doneCheck.checked=t.done;
       doneCheck.addEventListener('change',function(){
@@ -1189,6 +1312,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
         el('td',{},[t.property]),
         el('td',{},[t.guest||'\u2014']),
         el('td',{},[payInp]),
+        el('td',{},[feeInp]),
         el('td',{},[sel])
       ]));
     });
@@ -1197,8 +1321,8 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     panel.appendChild(scrollWrap);
 
     panel.appendChild(el('button',{class:'ghost',style:'margin-top:14px',onclick:function(){
-      var rows=[['Done','Date','Day','Property','Departing guest','Pay','Assigned to']];
-      tasks.forEach(function(t){rows.push([t.done?'Yes':'No',t.date,weekdayShort(t.date),t.property,t.guest,t.pay,cleaners[t.cleanerIndex]]);});
+      var rows=[['Done','Date','Day','Property','Departing guest','Pay to cleaner','Owner fee','Assigned to']];
+      tasks.forEach(function(t){rows.push([t.done?'Yes':'No',t.date,weekdayShort(t.date),t.property,t.guest,t.pay,t.ownerFee,cleaners[t.cleanerIndex]]);});
       var csv=rows.map(function(r){return r.map(function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\n');
       var blob=new Blob([csv],{type:'text/csv'});
       triggerDownload(blob,'cleaning-schedule-'+start+'.csv');
@@ -1339,7 +1463,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       var backup={
         version:1, exportedAt:new Date().toISOString(),
         properties:props, bookings:bookings, expenses:expenses,
-        cleaners:cleaners, cleaningOverrides:cleaningOverrides, cleaningPayOverrides:cleaningPayOverrides, cleaningDone:cleaningDone,
+        cleaners:cleaners, cleaningOverrides:cleaningOverrides, cleaningPayOverrides:cleaningPayOverrides, cleaningFeeOverrides:cleaningFeeOverrides, cleaningDone:cleaningDone,
         maintenanceIntervals:maintenanceIntervals
       };
       var blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
@@ -1365,12 +1489,13 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
           cleaners = data.cleaners||['Cleaner A','Cleaner B','Cleaner C','Cleaner D'];
           cleaningOverrides = data.cleaningOverrides||{};
           cleaningPayOverrides = data.cleaningPayOverrides||{};
+          cleaningFeeOverrides = data.cleaningFeeOverrides||{};
           cleaningDone = data.cleaningDone||{};
           maintenanceIntervals = data.maintenanceIntervals||{aircon:4,grease:1};
           Promise.all([
             save('properties',props), save('bookings',bookings), save('expenses',expenses),
             save('cleaners',cleaners), save('cleaningOverrides',cleaningOverrides),
-            save('cleaningPayOverrides',cleaningPayOverrides), save('cleaningDone',cleaningDone), save('maintenanceIntervals',maintenanceIntervals)
+            save('cleaningPayOverrides',cleaningPayOverrides), save('cleaningFeeOverrides',cleaningFeeOverrides), save('cleaningDone',cleaningDone), save('maintenanceIntervals',maintenanceIntervals)
           ]).then(function(){
             statusSpan.textContent='Restored: '+props.length+' properties, '+bookings.length+' bookings, '+expenses.length+' expenses.';
             render();
@@ -1398,6 +1523,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     else if(activeTab==='bookings')renderBookings(panel);
     else if(activeTab==='expenses')renderExpenses(panel);
     else if(activeTab==='owner')renderOwnerReport(panel);
+    else if(activeTab==='earnings')renderMyEarnings(panel);
     else if(activeTab==='cleaning')renderCleaningSchedule(panel);
     else if(activeTab==='maintenance')renderMaintenance(panel);
     else if(activeTab==='backup')renderBackup(panel);
