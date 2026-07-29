@@ -1030,7 +1030,7 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
     }
     panel.appendChild(filterRow);
 
-    var sorted=bookings.slice().sort(function(a,b){return b.checkIn.localeCompare(a.checkIn);});
+    var sorted=bookings.slice().sort(function(a,b){return a.checkIn.localeCompare(b.checkIn);});
     var q=bookingsSearchQuery.trim().toLowerCase();
     var filtered=sorted.filter(function(b){
       if(q && b.guest.toLowerCase().indexOf(q)===-1) return false;
