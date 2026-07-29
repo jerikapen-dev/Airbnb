@@ -415,6 +415,13 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     return {rev:rev,exp:exp,net:rev-exp,occ:occ,total:props.length};
   }
 
+  function ytdTotals(){
+    var year=today().slice(0,4);
+    var rev=bookings.filter(function(b){return b.checkIn.slice(0,4)===year;}).reduce(function(s,b){return s+Number(b.amount||0);},0);
+    var exp=expenses.filter(function(e){return e.date.slice(0,4)===year;}).reduce(function(s,e){return s+Number(e.amount||0);},0);
+    return {rev:rev,exp:exp,net:rev-exp,year:year};
+  }
+
   function lastFullMonthKey(){
     var t=new Date();
     var firstOfThisMonth=new Date(t.getFullYear(),t.getMonth(),1);
@@ -948,7 +955,10 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
         bookingsSelected[b.id]=selCheck.checked;
         render();
       });
-      tb.appendChild(el('tr',{},[
+      var isDup=!!dupFlags[b.id];
+      var statusCell=[el('span',{class:'badge',style:badgeStyle},[state])];
+      if(isDup) statusCell.push(el('span',{class:'badge',style:'background:var(--amber-l);color:var(--amber);margin-left:6px'},['Possible duplicate']));
+      tb.appendChild(el('tr',{style:isDup?'background:var(--amber-l)':''},[
         el('td',{},[selCheck]),
         el('td',{},[propShort(b.propertyId)]),
         el('td',{},[b.guest]),
@@ -956,7 +966,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
         el('td',{class:'mono'},[b.checkIn]),
         el('td',{class:'mono'},[b.checkOut]),
         el('td',{class:'mono'},[fmt(b.amount)]),
-        el('td',{},[el('span',{class:'badge',style:badgeStyle},[state])]),
+        el('td',{},statusCell),
         el('td',{},[el('button',{class:'small ghost',onclick:function(){
           bookings=bookings.filter(function(x){return x.id!==b.id;});
           save('bookings',bookings); render();
@@ -1049,6 +1059,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
   var payrollWeekStart=saturdayOnOrBefore(today());
   var payrollBreakdownMonth=thisMonth();
   var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='', bookingsFilterProperty='ALL';
+  var overviewSelectedMonth=thisMonth();
   var bookingsSelected={};
   var dismissedConflicts={};
 
