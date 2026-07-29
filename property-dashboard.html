@@ -159,6 +159,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     try{var r4=await storage.get('cleaners');cleaners=r4?JSON.parse(r4.value):['Cleaner A','Cleaner B','Cleaner C','Cleaner D'];}catch(e){cleaners=['Cleaner A','Cleaner B','Cleaner C','Cleaner D'];}
     try{var r5=await storage.get('cleaningOverrides');cleaningOverrides=r5?JSON.parse(r5.value):{};}catch(e){cleaningOverrides={};}
     try{var r6=await storage.get('cleaningPayOverrides');cleaningPayOverrides=r6?JSON.parse(r6.value):{};}catch(e){cleaningPayOverrides={};}
+    try{var r10=await storage.get('dismissedConflicts');dismissedConflicts=r10?JSON.parse(r10.value):{};}catch(e){dismissedConflicts={};}
     try{var r9=await storage.get('cleaningFeeOverrides');cleaningFeeOverrides=r9?JSON.parse(r9.value):{};}catch(e){cleaningFeeOverrides={};}
     try{var r8=await storage.get('cleaningDone');cleaningDone=r8?JSON.parse(r8.value):{};}catch(e){cleaningDone={};}
     try{var r7=await storage.get('maintenanceIntervals');maintenanceIntervals=r7?JSON.parse(r7.value):{aircon:4,grease:1};}catch(e){maintenanceIntervals={aircon:4,grease:1};}
@@ -473,14 +474,24 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
   }
 
   function renderOverview(panel){
-    var conflicts=detectDoubleBookings();
+    var conflicts=detectDoubleBookings().filter(function(c){
+      var key=[c.a.id,c.b.id].sort().join('_');
+      return !dismissedConflicts[key];
+    });
     if(conflicts.length>0){
       var confBox=el('div',{style:'background:var(--rust-l);border:1px solid var(--rust);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px'});
       confBox.appendChild(el('div',{style:'font-weight:600;color:var(--rust);font-size:13px;margin-bottom:6px'},['\u26a0 '+conflicts.length+' double-booking'+(conflicts.length===1?'':'s')+' detected']));
       conflicts.forEach(function(c){
-        confBox.appendChild(el('div',{style:'font-size:12px;color:var(--ink);padding:2px 0'},[
+        var key=[c.a.id,c.b.id].sort().join('_');
+        var row=el('div',{style:'display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:2px 0'});
+        row.appendChild(el('div',{style:'font-size:12px;color:var(--ink)'},[
           propShort(c.propertyId)+': '+c.a.guest+' ('+c.a.checkIn+' \u2192 '+c.a.checkOut+') overlaps '+c.b.guest+' ('+c.b.checkIn+' \u2192 '+c.b.checkOut+')'
         ]));
+        row.appendChild(el('button',{class:'small ghost',type:'button',style:'flex-shrink:0',onclick:function(){
+          dismissedConflicts[key]=true;
+          save('dismissedConflicts',dismissedConflicts); render();
+        }},['\u2715']));
+        confBox.appendChild(row);
       });
       panel.appendChild(confBox);
     }
@@ -954,8 +965,10 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
   var reportPropertyId='ALL', reportMonth=thisMonth();
   var earningsPropertyId='ALL', earningsMonth=thisMonth();
   var payrollWeekStart=saturdayOnOrBefore(today());
+  var payrollBreakdownMonth=thisMonth();
   var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='';
   var bookingsSelected={};
+  var dismissedConflicts={};
 
   function mgmtRateFor(propertyId){
     var p=props.find(function(x){return x.id===propertyId;});
@@ -1236,6 +1249,25 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     });
   }
 
+  function computeMonthlyPayrollBreakdown(mk){
+    var firstOfMonth=mk+'-01';
+    var daysInMo=new Date(Number(mk.slice(0,4)),Number(mk.slice(5,7)),0).getDate();
+    var lastOfMonth=mk+'-'+(daysInMo<10?'0':'')+daysInMo;
+    var d=saturdayOnOrBefore(firstOfMonth);
+    if(d<firstOfMonth) d=addDays(d,7);
+    var weeks=[];
+    while(d<=lastOfMonth){
+      weeks.push(d);
+      d=addDays(d,7);
+    }
+    return weeks.map(function(weekStart,idx){
+      var perCleaner=computePayroll(weekStart);
+      var total=perCleaner.reduce(function(s,p){return s+p.pay;},0);
+      var jobs=perCleaner.reduce(function(s,p){return s+p.jobs;},0);
+      return {weekNum:idx+1, weekStart:weekStart, weekEnd:addDays(weekStart,6), perCleaner:perCleaner, total:total, jobs:jobs};
+    });
+  }
+
   function renderCleaningSchedule(panel){
     panel.appendChild(el('div',{class:'section-title'},['Cleaning schedule']));
 
@@ -1256,20 +1288,19 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
     }
 
     var weekStart=saturdayOnOrBefore(today());
-    var rangeEnd=addDays(today(),14);
-    var start=weekStart;
-    var tasks=computeCleaningTasks(start,daysBetween(start,rangeEnd));
+    var periodEndDisplay=addDays(weekStart,6);
+    var tasks=computeCleaningTasksForWeek(weekStart);
 
     var counts=cleaners.map(function(){return 0;});
     tasks.forEach(function(t){counts[t.cleanerIndex]=(counts[t.cleanerIndex]||0)+1;});
     var summary=el('div',{class:'metrics',style:'padding:0 0 16px;grid-template-columns:repeat('+Math.min(cleaners.length,4)+',1fr);border-bottom:none'});
     cleaners.forEach(function(name,idx){
-      summary.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},[name]),el('div',{class:'val mono'},[counts[idx]+' cleaning'+(counts[idx]===1?'':'s')+' \u00b7 this week + next 14 days'])]));
+      summary.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},[name]),el('div',{class:'val mono'},[counts[idx]+' cleaning'+(counts[idx]===1?'':'s')+' \u00b7 this week'])]));
     });
     panel.appendChild(summary);
 
     panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin:-6px 0 12px'},[
-      'Showing checkouts from '+weekStart+' (start of this week) through '+rangeEnd+' \u2014 includes cleanings already done earlier this week.'
+      'This week\u2019s cutoff: '+weekStart+' (Sat) through '+periodEndDisplay+' (Fri).'
     ]));
 
     if(tasks.length===0){
@@ -1325,7 +1356,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       tasks.forEach(function(t){rows.push([t.done?'Yes':'No',t.date,weekdayShort(t.date),t.property,t.guest,t.pay,t.ownerFee,cleaners[t.cleanerIndex]]);});
       var csv=rows.map(function(r){return r.map(function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\n');
       var blob=new Blob([csv],{type:'text/csv'});
-      triggerDownload(blob,'cleaning-schedule-'+start+'.csv');
+      triggerDownload(blob,'cleaning-schedule-'+weekStart+'.csv');
     }},['Download schedule CSV']));
     }
 
@@ -1386,6 +1417,67 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       var blob=new Blob([csv],{type:'text/csv'});
       triggerDownload(blob,'cleaner-payroll-'+payrollWeekStart+'.csv');
     }},['Download payroll CSV']));
+
+    panel.appendChild(el('div',{style:'margin-top:28px;padding-top:16px;border-top:1px solid var(--line)'},[
+      el('div',{class:'section-title'},['Monthly cleaning fees paid \u2014 by week'])
+    ]));
+    var monthCtrl=el('div',{class:'row',style:'display:flex;gap:10px;align-items:flex-end;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px'});
+    var breakdownMonthInp=el('input',{type:'month',value:payrollBreakdownMonth});
+    breakdownMonthInp.addEventListener('change',function(){payrollBreakdownMonth=breakdownMonthInp.value||thisMonth();render();});
+    monthCtrl.appendChild(el('div',{class:'field'},[el('label',{},['Month']),breakdownMonthInp]));
+    panel.appendChild(monthCtrl);
+
+    var weeks=computeMonthlyPayrollBreakdown(payrollBreakdownMonth);
+    if(weeks.length===0){
+      panel.appendChild(el('div',{class:'empty'},['No pay weeks fall in this month.']));
+    }else{
+      var monthTbl=el('table');
+      var head=[el('th',{},['Week']),el('th',{},['Dates'])];
+      cleaners.forEach(function(name){head.push(el('th',{},[name]));});
+      head.push(el('th',{},['Total']));
+      monthTbl.appendChild(el('thead',{},[el('tr',{},head)]));
+      var monthTb=el('tbody');
+      var monthGrandTotal=0;
+      weeks.forEach(function(w){
+        monthGrandTotal+=w.total;
+        var row=[el('td',{},['Week '+w.weekNum]), el('td',{class:'mono'},[w.weekStart+' \u2013 '+w.weekEnd])];
+        cleaners.forEach(function(name,idx){
+          var p=w.perCleaner[idx];
+          row.push(el('td',{class:'mono'},[p?fmt(p.pay):'\u20B10']));
+        });
+        row.push(el('td',{class:'mono',style:'font-weight:500'},[fmt(w.total)]));
+        monthTb.appendChild(el('tr',{},row));
+      });
+      var totalRow=[el('td',{style:'font-weight:600'},['Month total']), el('td',{},[''])];
+      cleaners.forEach(function(name,idx){
+        var sum=weeks.reduce(function(s,w){return s+(w.perCleaner[idx]?w.perCleaner[idx].pay:0);},0);
+        totalRow.push(el('td',{class:'mono',style:'font-weight:600'},[fmt(sum)]));
+      });
+      totalRow.push(el('td',{class:'mono',style:'font-weight:600'},[fmt(monthGrandTotal)]));
+      monthTb.appendChild(el('tr',{style:'background:var(--line-soft)'},totalRow));
+      monthTbl.appendChild(monthTb);
+      panel.appendChild(el('div',{class:'table-scroll'},[monthTbl]));
+
+      panel.appendChild(el('button',{class:'ghost',style:'margin-top:14px',onclick:function(){
+        var rows=[['Week','Dates'].concat(cleaners).concat(['Total'])];
+        weeks.forEach(function(w){
+          var r=['Week '+w.weekNum, w.weekStart+' to '+w.weekEnd];
+          cleaners.forEach(function(name,idx){r.push(w.perCleaner[idx]?w.perCleaner[idx].pay.toFixed(2):'0');});
+          r.push(w.total.toFixed(2));
+          rows.push(r);
+        });
+        var totalR=['Month total',''];
+        cleaners.forEach(function(name,idx){
+          var sum=weeks.reduce(function(s,w){return s+(w.perCleaner[idx]?w.perCleaner[idx].pay:0);},0);
+          totalR.push(sum.toFixed(2));
+        });
+        totalR.push(monthGrandTotal.toFixed(2));
+        rows.push(totalR);
+        var csv=rows.map(function(r){return r.map(function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\n');
+        var blob=new Blob([csv],{type:'text/csv'});
+        triggerDownload(blob,'monthly-cleaner-pay-'+payrollBreakdownMonth+'.csv');
+      }},['Download monthly breakdown CSV']));
+    }
   }
 
   function lastServiceDate(propertyId,category){
@@ -1463,7 +1555,7 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
       var backup={
         version:1, exportedAt:new Date().toISOString(),
         properties:props, bookings:bookings, expenses:expenses,
-        cleaners:cleaners, cleaningOverrides:cleaningOverrides, cleaningPayOverrides:cleaningPayOverrides, cleaningFeeOverrides:cleaningFeeOverrides, cleaningDone:cleaningDone,
+        cleaners:cleaners, cleaningOverrides:cleaningOverrides, cleaningPayOverrides:cleaningPayOverrides, cleaningFeeOverrides:cleaningFeeOverrides, cleaningDone:cleaningDone, dismissedConflicts:dismissedConflicts,
         maintenanceIntervals:maintenanceIntervals
       };
       var blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
@@ -1490,12 +1582,13 @@ button.small{padding:8px 13px;font-size:12px;min-height:36px}
           cleaningOverrides = data.cleaningOverrides||{};
           cleaningPayOverrides = data.cleaningPayOverrides||{};
           cleaningFeeOverrides = data.cleaningFeeOverrides||{};
+          dismissedConflicts = data.dismissedConflicts||{};
           cleaningDone = data.cleaningDone||{};
           maintenanceIntervals = data.maintenanceIntervals||{aircon:4,grease:1};
           Promise.all([
             save('properties',props), save('bookings',bookings), save('expenses',expenses),
             save('cleaners',cleaners), save('cleaningOverrides',cleaningOverrides),
-            save('cleaningPayOverrides',cleaningPayOverrides), save('cleaningFeeOverrides',cleaningFeeOverrides), save('cleaningDone',cleaningDone), save('maintenanceIntervals',maintenanceIntervals)
+            save('cleaningPayOverrides',cleaningPayOverrides), save('cleaningFeeOverrides',cleaningFeeOverrides), save('cleaningDone',cleaningDone), save('dismissedConflicts',dismissedConflicts), save('maintenanceIntervals',maintenanceIntervals)
           ]).then(function(){
             statusSpan.textContent='Restored: '+props.length+' properties, '+bookings.length+' bookings, '+expenses.length+' expenses.';
             render();
