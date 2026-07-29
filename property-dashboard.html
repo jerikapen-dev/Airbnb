@@ -1234,6 +1234,7 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
   var reportPropertyId='ALL', reportMonth=thisMonth();
   var earningsPropertyId='ALL', earningsMonth=thisMonth();
   var payrollWeekStart=saturdayOnOrBefore(today());
+  var scheduleWeekStart=saturdayOnOrBefore(today());
   var payrollBreakdownMonth=thisMonth();
   var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='', bookingsFilterProperty='ALL';
   var showPropertyBulkTools=false, showBookingsImport=false, showExpensesImport=false;
@@ -1613,20 +1614,34 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
       return;
     }
 
-    var weekStart=saturdayOnOrBefore(today());
+    var weekNavRow=el('div',{class:'row',style:'display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px'});
+    var weekPickInp=el('input',{type:'date',value:scheduleWeekStart});
+    weekPickInp.addEventListener('change',function(){
+      scheduleWeekStart = weekPickInp.value ? saturdayOnOrBefore(weekPickInp.value) : saturdayOnOrBefore(today());
+      render();
+    });
+    var prevWeekBtn=el('button',{class:'small ghost',type:'button',onclick:function(){scheduleWeekStart=addDays(scheduleWeekStart,-7);render();}},['\u2190 Prev week']);
+    var nextWeekBtn=el('button',{class:'small ghost',type:'button',onclick:function(){scheduleWeekStart=addDays(scheduleWeekStart,7);render();}},['Next week \u2192']);
+    var thisWeekBtn=el('button',{class:'small ghost',type:'button',onclick:function(){scheduleWeekStart=saturdayOnOrBefore(today());render();}},['This week']);
+    weekNavRow.appendChild(el('div',{class:'field'},[el('label',{},['Any date in the week']),weekPickInp]));
+    weekNavRow.appendChild(el('div',{style:'display:flex;gap:6px'},[prevWeekBtn,nextWeekBtn,thisWeekBtn]));
+    panel.appendChild(weekNavRow);
+
+    var weekStart=scheduleWeekStart;
     var periodEndDisplay=addDays(weekStart,6);
     var tasks=computeCleaningTasksForWeek(weekStart);
+    var isCurrentWeek = weekStart===saturdayOnOrBefore(today());
 
     var counts=cleaners.map(function(){return 0;});
     tasks.forEach(function(t){counts[t.cleanerIndex]=(counts[t.cleanerIndex]||0)+1;});
     var summary=el('div',{class:'metrics',style:'padding:0 0 16px;grid-template-columns:repeat('+Math.min(cleaners.length,4)+',1fr);border-bottom:none'});
     cleaners.forEach(function(name,idx){
-      summary.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},[name]),el('div',{class:'val mono'},[counts[idx]+' cleaning'+(counts[idx]===1?'':'s')+' \u00b7 this week'])]));
+      summary.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},[name]),el('div',{class:'val mono'},[counts[idx]+' cleaning'+(counts[idx]===1?'':'s')+' \u00b7 '+(isCurrentWeek?'this week':weekStart)])]));
     });
     panel.appendChild(summary);
 
     panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin:-6px 0 12px'},[
-      'This week\u2019s cutoff: '+weekStart+' (Sat) through '+periodEndDisplay+' (Fri).'
+      (isCurrentWeek?'This week\u2019s cutoff: ':'Viewing week: ')+weekStart+' (Sat) through '+periodEndDisplay+' (Fri).'
     ]));
 
     if(tasks.length===0){
