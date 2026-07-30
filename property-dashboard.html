@@ -93,26 +93,156 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
 }
 </style>
 
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
 <div id="app"></div>
 <script>
 (function(){
   var LS_PREFIX='pmDashboard:';
+  var fsCache={}, fsDocRef=null, fsReady=false, currentUser=null;
+
   var storage={
     get:function(key){
+      if(fsReady){
+        return Promise.resolve(fsCache[key]!==undefined ? {key:key,value:fsCache[key]} : null);
+      }
       try{
         var v=localStorage.getItem(LS_PREFIX+key);
         return Promise.resolve(v===null?null:{key:key,value:v});
       }catch(e){ return Promise.reject(e); }
     },
     set:function(key,value){
+      if(fsReady && fsDocRef){
+        fsCache[key]=value;
+        var payload={}; payload[key]=value;
+        return fsDocRef.set(payload,{merge:true}).then(function(){return {key:key,value:value};});
+      }
       try{
         localStorage.setItem(LS_PREFIX+key,value);
         return Promise.resolve({key:key,value:value});
       }catch(e){ return Promise.reject(e); }
     }
   };
+
+  function getSavedFirebaseConfig(){
+    try{ var raw=localStorage.getItem('pmDashboard:firebaseConfig'); return raw?JSON.parse(raw):null; }catch(e){ return null; }
+  }
+  function saveFirebaseConfig(cfg){
+    try{ localStorage.setItem('pmDashboard:firebaseConfig', JSON.stringify(cfg)); }catch(e){}
+  }
+
+  function gateShell(title,subtitle,bodyEl){
+    var wrap=document.createElement('div');
+    wrap.style.cssText='max-width:420px;margin:60px auto;padding:0 20px;font-family:Inter,sans-serif;color:#1C1C1A';
+    var h=document.createElement('div');
+    h.style.cssText='font-family:Fraunces,serif;font-size:22px;font-weight:500;margin-bottom:6px';
+    h.textContent=title;
+    var p=document.createElement('div');
+    p.style.cssText='font-size:13px;color:#8C8C86;margin-bottom:20px;line-height:1.5';
+    p.textContent=subtitle;
+    wrap.appendChild(h); wrap.appendChild(p); wrap.appendChild(bodyEl);
+    return wrap;
+  }
+  function gInput(placeholder,type){
+    var i=document.createElement('input');
+    i.placeholder=placeholder; i.type=type||'text';
+    i.style.cssText='width:100%;font-size:16px;padding:10px;border:1px solid #EBEAE6;border-radius:6px;margin-bottom:10px;box-sizing:border-box';
+    return i;
+  }
+  function gButton(label,onclick){
+    var b=document.createElement('button');
+    b.textContent=label;
+    b.style.cssText='width:100%;font-size:14px;font-weight:500;padding:11px;border-radius:6px;border:1px solid #1C1C1A;background:#1C1C1A;color:#fff;cursor:pointer;margin-top:4px';
+    b.addEventListener('click',onclick);
+    return b;
+  }
+  function gError(msg){
+    var e=document.createElement('div');
+    e.style.cssText='color:#9C4A3C;font-size:12px;margin-top:8px';
+    e.textContent=msg;
+    return e;
+  }
+
+  function renderConfigGate(){
+    var app=document.getElementById('app');
+    var body=document.createElement('div');
+    var ta=document.createElement('textarea');
+    ta.placeholder='Paste your Firebase config object here (from the Firebase Console \u2192 Project settings \u2192 your web app)';
+    ta.style.cssText='width:100%;height:140px;font-size:13px;font-family:monospace;padding:10px;border:1px solid #EBEAE6;border-radius:6px;margin-bottom:10px;box-sizing:border-box';
+    body.appendChild(ta);
+    var errBox=document.createElement('div');
+    body.appendChild(errBox);
+    body.appendChild(gButton('Save and continue',function(){
+      errBox.innerHTML='';
+      try{
+        var text=ta.value.trim().replace(/^const\s+firebaseConfig\s*=\s*/,'').replace(/;\s*$/,'');
+        var cfg=new Function('return '+text)();
+        if(!cfg || !cfg.apiKey || !cfg.projectId){ throw new Error('missing fields'); }
+        saveFirebaseConfig(cfg);
+        location.reload();
+      }catch(e){
+        errBox.appendChild(gError('Could not read that config \u2014 paste the whole object exactly as copied from Firebase, including the curly braces.'));
+      }
+    }));
+    app.innerHTML='';
+    app.appendChild(gateShell('Connect your dashboard','One-time setup, per device. Paste the config object from your Firebase project (Project settings \u2192 General \u2192 Your apps \u2192 SDK setup and configuration).',body));
+  }
+
+  function renderAuthGate(auth){
+    var app=document.getElementById('app');
+    var body=document.createElement('div');
+    var emailInp=gInput('Email','email');
+    var passInp=gInput('Password','password');
+    body.appendChild(emailInp); body.appendChild(passInp);
+    var errBox=document.createElement('div');
+    var signInBtn=gButton('Sign in',function(){
+      errBox.innerHTML='';
+      auth.signInWithEmailAndPassword(emailInp.value.trim(),passInp.value).catch(function(e){
+        errBox.appendChild(gError(e.message||'Could not sign in.'));
+      });
+    });
+    var signUpBtn=gButton('Create account (first time only)',function(){
+      errBox.innerHTML='';
+      auth.createUserWithEmailAndPassword(emailInp.value.trim(),passInp.value).catch(function(e){
+        errBox.appendChild(gError(e.message||'Could not create account.'));
+      });
+    });
+    signUpBtn.style.background='#fff'; signUpBtn.style.color='#1C1C1A';
+    body.appendChild(signInBtn); body.appendChild(signUpBtn); body.appendChild(errBox);
+    app.innerHTML='';
+    app.appendChild(gateShell('Sign in','Use the same email and password on every device to see the same data everywhere.',body));
+  }
+
+  function startFirestoreSync(db,uid){
+    fsDocRef=db.collection('dashboards').doc(uid);
+    fsDocRef.onSnapshot(function(snap){
+      fsCache=snap.exists?(snap.data()||{}):{};
+      fsReady=true;
+      load();
+    },function(err){
+      console.error('Firestore sync error',err);
+    });
+  }
+
+  function bootstrap(){
+    var cfg=getSavedFirebaseConfig();
+    if(!cfg){ renderConfigGate(); return; }
+    try{
+      if(!firebase.apps.length) firebase.initializeApp(cfg);
+    }catch(e){
+      renderConfigGate(); return;
+    }
+    var auth=firebase.auth();
+    var db=firebase.firestore();
+    auth.onAuthStateChanged(function(user){
+      if(!user){ renderAuthGate(auth); return; }
+      currentUser=user;
+      startFirestoreSync(db,user.uid);
+    });
+  }
   var props=[], bookings=[], expenses=[], activeTab='overview', loaded=false;
   var MGMT_FEE_RATE=0.12;
   var CLEANING_CATEGORIES={'Cleaning':1,'Deep cleaning':1,'Grease trap':1,'Aircon cleaning':1};
@@ -1977,7 +2107,7 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
     }
   });
 
-  load();
+  bootstrap();
 })();
 </script>
 </body>
