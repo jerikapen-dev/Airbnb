@@ -1337,52 +1337,63 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     props.forEach(function(p){propFilterSel.appendChild(el('option',{value:p.id},[(p.shortcut&&p.shortcut.trim()&&p.shortcut.trim()!==p.name)?(p.shortcut+' \u2014 '+p.name):p.name]));});
     propFilterSel.value=bookingsFilterProperty;
     propFilterSel.addEventListener('change',function(){bookingsFilterProperty=propFilterSel.value;render();});
-    var statusFilterSel=el('select',{});
-    [['ALL','All statuses'],['Upcoming','Upcoming'],['In stay','In stay'],['Completed','Completed'],['DUP_EXACT','Exact duplicates'],['DUP_NEAR','Different amount (near-duplicate)']].forEach(function(o){
-      statusFilterSel.appendChild(el('option',{value:o[0]},[o[1]]));
-    });
-    statusFilterSel.value=bookingsFilterStatus;
-    statusFilterSel.addEventListener('change',function(){bookingsFilterStatus=statusFilterSel.value;render();});
-    var channelFilterSel=el('select',{});
-    var channelsPresent=[]; bookings.forEach(function(b){ if(b.channel && channelsPresent.indexOf(b.channel)===-1) channelsPresent.push(b.channel); });
-    ['Airbnb','Booking.com','Direct','Agoda','Other'].forEach(function(c){ if(channelsPresent.indexOf(c)===-1) channelsPresent.push(c); });
-    channelFilterSel.appendChild(el('option',{value:'ALL'},['All channels']));
-    channelsPresent.forEach(function(c){ channelFilterSel.appendChild(el('option',{value:c},[c])); });
-    channelFilterSel.value=bookingsFilterChannel;
-    channelFilterSel.addEventListener('change',function(){bookingsFilterChannel=channelFilterSel.value;render();});
     var fromInp=el('input',{type:'date',value:bookingsFilterFrom});
     fromInp.addEventListener('change',function(){bookingsFilterFrom=fromInp.value;render();});
     var toInp=el('input',{type:'date',value:bookingsFilterTo});
     toInp.addEventListener('change',function(){bookingsFilterTo=toInp.value;render();});
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Search guest']),searchInp]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Listing']),propFilterSel]));
-    filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Channel']),channelFilterSel]));
-    filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Status']),statusFilterSel]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Check-in from']),fromInp]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Check-in to']),toInp]));
-    if(bookingsSearchQuery||bookingsFilterFrom||bookingsFilterTo||bookingsFilterProperty!=='ALL'||bookingsFilterStatus!=='ALL'||bookingsFilterChannel!=='ALL'){
+    if(bookingsSearchQuery||bookingsFilterFrom||bookingsFilterTo||bookingsFilterProperty!=='ALL'||bookingsFilterStatuses.length||bookingsFilterChannels.length){
       filterRow.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
-        bookingsSearchQuery='';bookingsFilterFrom='';bookingsFilterTo='';bookingsFilterProperty='ALL';bookingsFilterStatus='ALL';bookingsFilterChannel='ALL';render();
+        bookingsSearchQuery='';bookingsFilterFrom='';bookingsFilterTo='';bookingsFilterProperty='ALL';bookingsFilterStatuses=[];bookingsFilterChannels=[];render();
       }},['Clear filters']));
     }
     panel.appendChild(filterRow);
+
+    function pillToggleGroup(labelText, options, selectedArr){
+      var wrap=el('div',{style:'margin-bottom:14px'});
+      wrap.appendChild(el('div',{style:'font-size:11px;color:var(--ink-soft);margin-bottom:6px'},[labelText+' \u2014 tap any number to combine them']));
+      var row=el('div',{style:'display:flex;gap:6px;flex-wrap:wrap'});
+      options.forEach(function(o){
+        var active=selectedArr.indexOf(o[0])>-1;
+        var pill=el('button',{type:'button',class:active?'':'ghost',style:'padding:7px 12px;font-size:12px;min-height:34px'},[o[1]]);
+        pill.addEventListener('click',function(){
+          var idx=selectedArr.indexOf(o[0]);
+          if(idx>-1) selectedArr.splice(idx,1); else selectedArr.push(o[0]);
+          render();
+        });
+        row.appendChild(pill);
+      });
+      wrap.appendChild(row);
+      return wrap;
+    }
+    var channelsPresent=[]; bookings.forEach(function(b){ if(b.channel && channelsPresent.indexOf(b.channel)===-1) channelsPresent.push(b.channel); });
+    ['Airbnb','Booking.com','Direct','Agoda','Other'].forEach(function(c){ if(channelsPresent.indexOf(c)===-1) channelsPresent.push(c); });
+    panel.appendChild(pillToggleGroup('Status', [
+      ['Upcoming','Upcoming'],['In stay','In stay'],['Completed','Completed'],
+      ['DUP_EXACT','Exact duplicates'],['DUP_NEAR','Different amount']
+    ], bookingsFilterStatuses));
+    panel.appendChild(pillToggleGroup('Channel', channelsPresent.map(function(c){return [c,c];}), bookingsFilterChannels));
 
     var sorted=bookings.slice().sort(function(a,b){return a.checkIn.localeCompare(b.checkIn);});
     var q=bookingsSearchQuery.trim().toLowerCase();
     var filtered=sorted.filter(function(b){
       if(q && b.guest.toLowerCase().indexOf(q)===-1) return false;
       if(bookingsFilterProperty!=='ALL' && b.propertyId!==bookingsFilterProperty) return false;
-      if(bookingsFilterChannel!=='ALL' && b.channel!==bookingsFilterChannel) return false;
+      if(bookingsFilterChannels.length && bookingsFilterChannels.indexOf(b.channel)===-1) return false;
       if(bookingsFilterFrom && b.checkIn<bookingsFilterFrom) return false;
       if(bookingsFilterTo && b.checkIn>bookingsFilterTo) return false;
-      if(bookingsFilterStatus!=='ALL'){
-        if(bookingsFilterStatus==='DUP_EXACT'){ if(!(dupFlags[b.id] && dupFlags[b.id].exact)) return false; }
-        else if(bookingsFilterStatus==='DUP_NEAR'){ if(!(dupFlags[b.id] && !dupFlags[b.id].exact)) return false; }
-        else{
-          var t=today();
-          var state = t<b.checkIn ? 'Upcoming' : (t>=b.checkIn && t<b.checkOut ? 'In stay' : 'Completed');
-          if(state!==bookingsFilterStatus) return false;
-        }
+      if(bookingsFilterStatuses.length){
+        var t=today();
+        var state = t<b.checkIn ? 'Upcoming' : (t>=b.checkIn && t<b.checkOut ? 'In stay' : 'Completed');
+        var matchesAny=bookingsFilterStatuses.some(function(fs){
+          if(fs==='DUP_EXACT') return !!(dupFlags[b.id] && dupFlags[b.id].exact);
+          if(fs==='DUP_NEAR') return !!(dupFlags[b.id] && !dupFlags[b.id].exact);
+          return state===fs;
+        });
+        if(!matchesAny) return false;
       }
       return true;
     });
@@ -1634,7 +1645,8 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   var payrollWeekStart=saturdayOnOrBefore(today());
   var scheduleWeekStart=saturdayOnOrBefore(today());
   var payrollBreakdownMonth=thisMonth();
-  var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='', bookingsFilterProperty='ALL', bookingsFilterStatus='ALL', bookingsFilterChannel='ALL';
+  var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='', bookingsFilterProperty='ALL';
+  var bookingsFilterStatuses=[], bookingsFilterChannels=[];
   var showPropertyBulkTools=false, showBookingsImport=false, showExpensesImport=false;
   var pendingBookingImport=null;
   var editingBookingId=null;
