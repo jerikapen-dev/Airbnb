@@ -619,6 +619,27 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     return flagged;
   }
 
+  function autoDeleteExactDuplicates(){
+    var groups={};
+    bookings.forEach(function(b){
+      var key=bookingSignature(b.guest,b.checkIn,b.checkOut,b.amount);
+      (groups[key]=groups[key]||[]).push(b);
+    });
+    var toDelete={};
+    Object.keys(groups).forEach(function(key){
+      var group=groups[key];
+      if(group.length>1){
+        for(var i=1;i<group.length;i++){ toDelete[group[i].id]=true; }
+      }
+    });
+    var count=Object.keys(toDelete).length;
+    if(count===0) return 0;
+    pushUndoSnapshot();
+    bookings=bookings.filter(function(b){ return !toDelete[b.id]; });
+    save('bookings',bookings);
+    return count;
+  }
+
   function todaysCheckouts(){
     var t=today();
     return bookings.filter(function(b){return b.checkOut===t;});
@@ -1235,7 +1256,23 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       if(exactCount>0 && nearCount>0) msg+=', and ';
       if(nearCount>0) msg+=nearCount+' with matching guest & dates but a different amount (worth a second look)';
       msg+='. Flagged below.';
-      dupBox.appendChild(el('div',{style:'font-weight:600;color:var(--amber);font-size:13px'},[msg]));
+      dupBox.appendChild(el('div',{style:'font-weight:600;color:var(--amber);font-size:13px;margin-bottom:8px'},[msg]));
+      if(exactCount>0){
+        var exactGroupSigs={};
+        bookings.forEach(function(b){
+          if(dupFlags[b.id] && dupFlags[b.id].exact){
+            var sig=bookingSignature(b.guest,b.checkIn,b.checkOut,b.amount);
+            exactGroupSigs[sig]=(exactGroupSigs[sig]||0)+1;
+          }
+        });
+        var removeCount=0;
+        Object.keys(exactGroupSigs).forEach(function(sig){ removeCount+=exactGroupSigs[sig]-1; });
+        dupBox.appendChild(el('button',{class:'small',onclick:function(){
+          if(!confirm('Delete '+removeCount+' exact-duplicate booking(s), keeping one copy of each? This only removes rows matching on guest, check-in, check-out, and amount \u2014 near-duplicates with a different amount are left for you to check. You can Undo right after if needed.')) return;
+          var n=autoDeleteExactDuplicates();
+          render();
+        }},['Auto-delete '+removeCount+' exact duplicate'+(removeCount===1?'':'s')+' (keep one each)']));
+      }
       panel.appendChild(dupBox);
     }
     var form=el('form',{class:'row',onsubmit:function(ev){
@@ -1300,17 +1337,24 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     props.forEach(function(p){propFilterSel.appendChild(el('option',{value:p.id},[(p.shortcut&&p.shortcut.trim()&&p.shortcut.trim()!==p.name)?(p.shortcut+' \u2014 '+p.name):p.name]));});
     propFilterSel.value=bookingsFilterProperty;
     propFilterSel.addEventListener('change',function(){bookingsFilterProperty=propFilterSel.value;render();});
+    var statusFilterSel=el('select',{});
+    [['ALL','All statuses'],['Upcoming','Upcoming'],['In stay','In stay'],['Completed','Completed'],['DUP_EXACT','Exact duplicates'],['DUP_NEAR','Different amount (near-duplicate)']].forEach(function(o){
+      statusFilterSel.appendChild(el('option',{value:o[0]},[o[1]]));
+    });
+    statusFilterSel.value=bookingsFilterStatus;
+    statusFilterSel.addEventListener('change',function(){bookingsFilterStatus=statusFilterSel.value;render();});
     var fromInp=el('input',{type:'date',value:bookingsFilterFrom});
     fromInp.addEventListener('change',function(){bookingsFilterFrom=fromInp.value;render();});
     var toInp=el('input',{type:'date',value:bookingsFilterTo});
     toInp.addEventListener('change',function(){bookingsFilterTo=toInp.value;render();});
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Search guest']),searchInp]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Listing']),propFilterSel]));
+    filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Status']),statusFilterSel]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Check-in from']),fromInp]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Check-in to']),toInp]));
-    if(bookingsSearchQuery||bookingsFilterFrom||bookingsFilterTo||bookingsFilterProperty!=='ALL'){
+    if(bookingsSearchQuery||bookingsFilterFrom||bookingsFilterTo||bookingsFilterProperty!=='ALL'||bookingsFilterStatus!=='ALL'){
       filterRow.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
-        bookingsSearchQuery='';bookingsFilterFrom='';bookingsFilterTo='';bookingsFilterProperty='ALL';render();
+        bookingsSearchQuery='';bookingsFilterFrom='';bookingsFilterTo='';bookingsFilterProperty='ALL';bookingsFilterStatus='ALL';render();
       }},['Clear filters']));
     }
     panel.appendChild(filterRow);
@@ -1322,6 +1366,15 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       if(bookingsFilterProperty!=='ALL' && b.propertyId!==bookingsFilterProperty) return false;
       if(bookingsFilterFrom && b.checkIn<bookingsFilterFrom) return false;
       if(bookingsFilterTo && b.checkIn>bookingsFilterTo) return false;
+      if(bookingsFilterStatus!=='ALL'){
+        if(bookingsFilterStatus==='DUP_EXACT'){ if(!(dupFlags[b.id] && dupFlags[b.id].exact)) return false; }
+        else if(bookingsFilterStatus==='DUP_NEAR'){ if(!(dupFlags[b.id] && !dupFlags[b.id].exact)) return false; }
+        else{
+          var t=today();
+          var state = t<b.checkIn ? 'Upcoming' : (t>=b.checkIn && t<b.checkOut ? 'In stay' : 'Completed');
+          if(state!==bookingsFilterStatus) return false;
+        }
+      }
       return true;
     });
 
@@ -1524,7 +1577,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   var payrollWeekStart=saturdayOnOrBefore(today());
   var scheduleWeekStart=saturdayOnOrBefore(today());
   var payrollBreakdownMonth=thisMonth();
-  var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='', bookingsFilterProperty='ALL';
+  var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='', bookingsFilterProperty='ALL', bookingsFilterStatus='ALL';
   var showPropertyBulkTools=false, showBookingsImport=false, showExpensesImport=false;
   var pendingBookingImport=null;
   var overviewSelectedMonth=thisMonth();
