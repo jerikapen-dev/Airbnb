@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Portfolio dashboard</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#3E6259">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Dashboard">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 :root{
@@ -67,6 +74,7 @@ button:hover{opacity:.82}
 button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
 button.ghost:hover{background:var(--accent-l);border-color:var(--accent-l);opacity:1}
 button.small{padding:7px 12px;font-size:12px;min-height:34px}
+button:disabled{opacity:.35;cursor:default;pointer-events:none}
 
 .empty{color:var(--ink-soft);font-size:13px;padding:32px 20px;text-align:center}
 
@@ -249,6 +257,49 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
   var cleaners=['Cleaner A','Cleaner B','Cleaner C','Cleaner D','Cleaner E','Cleaner F'];
   var cleaningOverrides={};
   var cleaningPayOverrides={};
+  var undoStack=[], redoStack=[];
+  var UNDO_LIMIT=20;
+
+  function snapshotState(){
+    return JSON.stringify({
+      properties:props, bookings:bookings, expenses:expenses, cleaners:cleaners,
+      cleaningOverrides:cleaningOverrides, cleaningPayOverrides:cleaningPayOverrides,
+      cleaningFeeOverrides:cleaningFeeOverrides, cleaningDone:cleaningDone,
+      dismissedConflicts:dismissedConflicts, maintenanceIntervals:maintenanceIntervals
+    });
+  }
+  function pushUndoSnapshot(){
+    undoStack.push(snapshotState());
+    if(undoStack.length>UNDO_LIMIT) undoStack.shift();
+    redoStack=[];
+  }
+  function applySnapshot(json){
+    var s=JSON.parse(json);
+    props=s.properties; bookings=s.bookings; expenses=s.expenses; cleaners=s.cleaners;
+    cleaningOverrides=s.cleaningOverrides; cleaningPayOverrides=s.cleaningPayOverrides;
+    cleaningFeeOverrides=s.cleaningFeeOverrides; cleaningDone=s.cleaningDone;
+    dismissedConflicts=s.dismissedConflicts; maintenanceIntervals=s.maintenanceIntervals;
+    return Promise.all([
+      save('properties',props), save('bookings',bookings), save('expenses',expenses), save('cleaners',cleaners),
+      save('cleaningOverrides',cleaningOverrides), save('cleaningPayOverrides',cleaningPayOverrides),
+      save('cleaningFeeOverrides',cleaningFeeOverrides), save('cleaningDone',cleaningDone),
+      save('dismissedConflicts',dismissedConflicts), save('maintenanceIntervals',maintenanceIntervals)
+    ]);
+  }
+  function doUndo(){
+    if(undoStack.length===0) return;
+    var current=snapshotState();
+    var prev=undoStack.pop();
+    redoStack.push(current);
+    applySnapshot(prev).then(function(){ render(); });
+  }
+  function doRedo(){
+    if(redoStack.length===0) return;
+    var current=snapshotState();
+    var next=redoStack.pop();
+    undoStack.push(current);
+    applySnapshot(next).then(function(){ render(); });
+  }
   var cleaningFeeOverrides={};
   var cleaningDone={};
   var TURNOVER_DEFAULTS={'Studio':400,'1BR':500,'2BR':700,'3BR':800};
@@ -379,33 +430,56 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
     return (guest||'').trim().toLowerCase()+'|'+checkIn+'|'+checkOut+'|'+Number(amount||0).toFixed(2);
   }
 
-  function importBookingsCSV(text){
+  function parseBookingsCandidates(text){
     var rows=parseCSV(text);
-    var added=0, skipped=0, duplicatesSkipped=0;
     var existingSignatures={};
     bookings.forEach(function(b){ existingSignatures[bookingSignature(b.guest,b.checkIn,b.checkOut,b.amount)]=true; });
+    var candidates=[];
     rows.forEach(function(r){
       var propRaw=pick(r,['property','listing','property name','unit']);
       var propertyId=findPropertyIdByNameOrShortcut(propRaw) || (props.length===1?props[0].id:null);
       var checkIn=toISODate(pick(r,['check-in','checkin','start date','arrival']));
       var checkOut=toISODate(pick(r,['check-out','checkout','end date','departure']));
-      // 'amount' = Airbnb's net payout after their service fee, and per your commission structure,
-      // the 10/12/20% management fee is calculated on that net payout, so it takes priority.
-      var amount=Number(pick(r,['amount','payout','gross earnings','earnings','total payout','price']).toString().replace(/[^0-9.\-]/g,''))||0;
+      // Prefer 'net' when present (e.g. Booking.com payout exports list gross 'Amount' plus
+      // deductions plus 'Net') since your commission is calculated on the actual net payout,
+      // same as Airbnb's 'Amount' column (which is already net of Airbnb's own service fee).
+      var amount=Number(pick(r,['net','amount','payout','gross earnings','earnings','total payout','price']).toString().replace(/[^0-9.\-]/g,''))||0;
       var guest=pick(r,['guest','guest name']);
       var phone=pick(r,['phone','phone number','contact number','mobile']);
       var email=pick(r,['email','email address']);
       var channel=pick(r,['channel','platform','source']);
-      if(!channel){ channel = (r['service fee']!==undefined || r['gross earnings']!==undefined) ? 'Airbnb' : 'Other'; }
-      if(!propertyId||!checkIn||!checkOut){skipped++;return;}
-      var sig=bookingSignature(guest,checkIn,checkOut,amount);
-      if(existingSignatures[sig]){ duplicatesSkipped++; return; }
-      existingSignatures[sig]=true;
-      bookings.push({id:uid(),propertyId:propertyId,guest:guest||'Guest',phone:phone,email:email,channel:channel,checkIn:checkIn,checkOut:checkOut,amount:amount,checkedIn:false,checkedOut:false});
-      added++;
+      if(!channel){
+        if(r['service fee']!==undefined || r['gross earnings']!==undefined) channel='Airbnb';
+        else if(r['payments service provider']!==undefined || r['booking number']!==undefined) channel='Booking.com';
+        else channel='Other';
+      }
+      var status='ok', reason='';
+      if(!checkIn||!checkOut){ status='invalid'; reason='Missing check-in/check-out'; }
+      else if(!propertyId){ status='invalid'; reason='No matching property (add \u201c'+(propRaw||'\u2014')+'\u201d as a property or shortcut first)'; }
+      else{
+        var sig=bookingSignature(guest,checkIn,checkOut,amount);
+        if(existingSignatures[sig]){ status='duplicate'; reason='Same guest, dates, and amount already on file'; }
+        else{ existingSignatures[sig]=true; }
+      }
+      candidates.push({
+        propertyId:propertyId, propertyLabel:propertyId?propShort(propertyId):(propRaw||'\u2014'),
+        guest:guest||'Guest', phone:phone, email:email, channel:channel,
+        checkIn:checkIn, checkOut:checkOut, amount:amount,
+        status:status, reason:reason, selected:(status==='ok')
+      });
     });
-    if(added>0)save('bookings',bookings);
-    return {added:added,skipped:skipped,duplicatesSkipped:duplicatesSkipped};
+    return candidates;
+  }
+
+  function commitBookingsCandidates(candidates){
+    var toAdd=candidates.filter(function(c){ return c.selected && c.status==='ok'; });
+    if(toAdd.length===0) return 0;
+    pushUndoSnapshot();
+    toAdd.forEach(function(c){
+      bookings.push({id:uid(),propertyId:c.propertyId,guest:c.guest,phone:c.phone,email:c.email,channel:c.channel,checkIn:c.checkIn,checkOut:c.checkOut,amount:c.amount,checkedIn:false,checkedOut:false});
+    });
+    save('bookings',bookings);
+    return toAdd.length;
   }
 
   function importExpensesCSV(text){
@@ -427,7 +501,7 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
       expenses.push({id:uid(),propertyId:propertyId,category:category,item:item,amount:amount,actualCost:actualCost,ownExpense:ownExpense,date:date,note:note});
       added++;
     });
-    if(added>0)save('expenses',expenses);
+    if(added>0){ pushUndoSnapshot(); save('expenses',expenses); }
     return {added:added,skipped:skipped};
   }
 
@@ -447,7 +521,7 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
       props.push({id:uid(),name:name,type:'Studio',cleanerIndex:0,mgmtFeeRate:0.12,turnoverRate:TURNOVER_DEFAULTS['Studio'],cleaningFeeRate:CLEANING_FEE_DEFAULT});
       added++;
     });
-    if(added>0)save('properties',props);
+    if(added>0){ pushUndoSnapshot(); save('properties',props); }
     return {added:added,skipped:skipped};
   }
 
@@ -464,7 +538,7 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
       p.turnoverRate=rate;
       updated++;
     });
-    if(updated>0)save('properties',props);
+    if(updated>0){ pushUndoSnapshot(); save('properties',props); }
     return {updated:updated,skipped:skipped};
   }
 
@@ -481,7 +555,7 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
       p.cleaningFeeRate=rate;
       updated++;
     });
-    if(updated>0)save('properties',props);
+    if(updated>0){ pushUndoSnapshot(); save('properties',props); }
     return {updated:updated,skipped:skipped};
   }
 
@@ -641,11 +715,15 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
 
   function renderTopbar(root){
     var t=overallTotals();
+    var undoBtn=el('button',{class:'ghost small',type:'button',onclick:doUndo},['\u21b6 Undo']);
+    if(undoStack.length===0) undoBtn.setAttribute('disabled','disabled');
+    var redoBtn=el('button',{class:'ghost small',type:'button',onclick:doRedo},['\u21b7 Redo']);
+    if(redoStack.length===0) redoBtn.setAttribute('disabled','disabled');
     root.appendChild(el('div',{class:'topbar'},[
       el('div',{class:'brand'},[
         el('div',{class:'eyebrow'},['Property Operations']),el('h1',{},['Portfolio dashboard']),el('p',{},[t.total+' properties tracked \u00b7 '+t.occ+' occupied today'])
       ]),
-      el('button',{onclick:function(){activeTab='properties';render();}},['Manage properties'])
+      el('div',{style:'display:flex;gap:8px;align-items:center'},[undoBtn,redoBtn,el('button',{onclick:function(){activeTab='properties';render();}},['Manage properties'])])
     ]));
     var m=el('div',{class:'metrics'});
     m.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},['Revenue, this month']),el('div',{class:'val mono'},[fmt(t.rev)])]));
@@ -809,6 +887,8 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
     var fromProp=props.find(function(p){return p.id===fromId;});
     var intoProp=props.find(function(p){return p.id===intoId;});
     if(!fromProp||!intoProp) return {merged:0};
+
+    pushUndoSnapshot();
 
     var movedBookings=0, movedExpenses=0;
     bookings.forEach(function(b){ if(b.propertyId===fromId){ b.propertyId=intoId; movedBookings++; } });
@@ -1071,7 +1151,55 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
     return s;
   }
 
+  function renderBookingImportReview(panel){
+    panel.appendChild(el('div',{class:'section-title'},['Review before importing']));
+    var okCount=pendingBookingImport.filter(function(c){return c.status==='ok';}).length;
+    var selCount=pendingBookingImport.filter(function(c){return c.selected && c.status==='ok';}).length;
+    panel.appendChild(el('div',{style:'font-size:13px;color:var(--muted);margin-bottom:16px;max-width:640px'},[
+      'Nothing has been added yet. '+pendingBookingImport.length+' row(s) found in the file, '+okCount+' ready to import ('+selCount+' selected below). Uncheck anything you don\u2019t want, then confirm.'
+    ]));
+    var tbl=el('table');
+    tbl.appendChild(el('thead',{},[el('tr',{},[
+      el('th',{},['']),el('th',{},['Property']),el('th',{},['Guest']),el('th',{},['Channel']),el('th',{},['Check-in']),el('th',{},['Check-out']),el('th',{},['Amount']),el('th',{},['Status'])
+    ])]));
+    var tb=el('tbody');
+    pendingBookingImport.forEach(function(c){
+      var check=el('input',{type:'checkbox',style:'width:18px;height:18px;min-height:auto'});
+      check.checked=c.selected;
+      check.disabled=(c.status!=='ok');
+      check.addEventListener('change',function(){ c.selected=check.checked; render(); });
+      var statusBadge;
+      if(c.status==='ok') statusBadge=el('span',{class:'badge',style:'background:var(--green-l);color:var(--green)'},['Ready']);
+      else if(c.status==='duplicate') statusBadge=el('span',{class:'badge',style:'background:var(--amber-l);color:var(--amber)'},['Duplicate']);
+      else statusBadge=el('span',{class:'badge',style:'background:var(--rust-l);color:var(--rust)'},['Can\u2019t import']);
+      var statusCell=[statusBadge];
+      if(c.reason) statusCell.push(el('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:2px'},[c.reason]));
+      tb.appendChild(el('tr',{style:c.status==='ok'?'':'opacity:.6'},[
+        el('td',{},[check]),
+        el('td',{},[c.propertyLabel]),
+        el('td',{},[c.guest]),
+        el('td',{},[c.channel]),
+        el('td',{class:'mono'},[c.checkIn||'\u2014']),
+        el('td',{class:'mono'},[c.checkOut||'\u2014']),
+        el('td',{class:'mono'},[fmt(c.amount)]),
+        el('td',{},statusCell)
+      ]));
+    });
+    tbl.appendChild(tb);
+    panel.appendChild(el('div',{class:'table-scroll'},[tbl]));
+
+    var actionRow=el('div',{style:'display:flex;gap:8px;margin-top:16px'});
+    actionRow.appendChild(el('button',{onclick:function(){
+      var n=commitBookingsCandidates(pendingBookingImport);
+      pendingBookingImport=null;
+      render();
+    }},['Import selected ('+selCount+')']));
+    actionRow.appendChild(el('button',{class:'ghost',onclick:function(){ pendingBookingImport=null; render(); }},['Cancel \u2014 add nothing']));
+    panel.appendChild(actionRow);
+  }
+
   function renderBookings(panel){
+    if(pendingBookingImport){ renderBookingImportReview(panel); return; }
     panel.appendChild(el('div',{class:'section-title'},['Bookings']));
     var dupFlags=duplicateBookingIds();
     var dupCount=Object.keys(dupFlags).length;
@@ -1126,8 +1254,7 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
       var f=fileInput.files[0]; if(!f)return;
       var reader=new FileReader();
       reader.onload=function(){
-        var res=importBookingsCSV(String(reader.result));
-        statusSpan.textContent='Imported '+res.added+' booking(s). Skipped '+res.skipped+' (missing property match or dates). Auto-declined '+res.duplicatesSkipped+' exact duplicate(s) (same guest, dates, and amount already on file).';
+        pendingBookingImport=parseBookingsCandidates(String(reader.result));
         render();
       };
       reader.readAsText(f);
@@ -1175,6 +1302,7 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
     bulkRow.appendChild(el('span',{},[filtered.length+' booking'+(filtered.length===1?'':'s')+' shown'+(selectedCount>0?' \u00b7 '+selectedCount+' selected':'')]));
     if(selectedCount>0){
       bulkRow.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
+        pushUndoSnapshot();
         bookings=bookings.filter(function(x){return !bookingsSelected[x.id];});
         bookingsSelected={};
         save('bookings',bookings); render();
@@ -1368,6 +1496,7 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
   var payrollBreakdownMonth=thisMonth();
   var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='', bookingsFilterProperty='ALL';
   var showPropertyBulkTools=false, showBookingsImport=false, showExpensesImport=false;
+  var pendingBookingImport=null;
   var overviewSelectedMonth=thisMonth();
   var bookingsSelected={};
   var dismissedConflicts={};
@@ -2141,6 +2270,12 @@ button.small{padding:7px 12px;font-size:12px;min-height:34px}
       }, 300);
     }
   });
+
+  if('serviceWorker' in navigator){
+    window.addEventListener('load',function(){
+      navigator.serviceWorker.register('sw.js').catch(function(e){ console.warn('SW registration failed',e); });
+    });
+  }
 
   bootstrap();
 })();
