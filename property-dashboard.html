@@ -1786,19 +1786,6 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     panel.appendChild(card);
 
     var ownerReportBtnRow=el('div',{style:'display:flex;gap:8px;margin-top:14px'});
-    ownerReportBtnRow.appendChild(el('button',{class:'ghost',onclick:function(){
-      var csv='Line,Amount,% of sales\n';
-      csv+='Amount paid from Airbnb/Booking.com,'+r.gross.toFixed(2)+',100.0\n';
-      csv+='Management fee,'+(-r.mgmtFee).toFixed(2)+','+r.mgmtPct.toFixed(1)+'\n';
-      csv+='Maintenance expenses,'+(-r.maintenance).toFixed(2)+','+r.maintenancePct.toFixed(1)+'\n';
-      csv+='Replacement expenses,'+(-r.replacement).toFixed(2)+','+r.replacementPct.toFixed(1)+'\n';
-      csv+='Toiletries,'+(-r.toiletries).toFixed(2)+','+r.toiletriesPct.toFixed(1)+'\n';
-      csv+='Other expenses,'+(-r.other).toFixed(2)+','+r.otherPct.toFixed(1)+'\n';
-      csv+='Cleaning & laundry fee,'+(-r.cleaningLaundry).toFixed(2)+','+r.cleaningLaundryPct.toFixed(1)+'\n';
-      csv+='Net payout to owner,'+r.netOwner.toFixed(2)+',\n';
-      var blob=new Blob([csv],{type:'text/csv'});
-      triggerDownload(blob,'owner-report-'+label.replace(/\s+/g,'-')+'-'+reportMonth+'.csv');
-    }},['Download this report as CSV']));
     ownerReportBtnRow.appendChild(el('button',{class:'ghost',onclick:function(){window.print();}},['Print / Save as PDF']));
     panel.appendChild(ownerReportBtnRow);
 
@@ -1846,22 +1833,33 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     });
     if(!anyReservations){
       panel.appendChild(el('div',{class:'empty'},['No reservations for this period.']));
-    }else{
-      panel.appendChild(el('button',{class:'ghost',style:'margin-top:14px',onclick:function(){
-        var rows=[['Property','Guest','Check-in','Check-out','Nights','Booked via','Amount paid']];
-        relevantProps.forEach(function(p){
-          bookings.filter(function(b){return b.propertyId===p.id && monthKey(b.checkIn)===reportMonth;})
-            .sort(function(a,b){return a.checkIn.localeCompare(b.checkIn);})
-            .forEach(function(b){
-              var nights=Math.round((new Date(b.checkOut)-new Date(b.checkIn))/86400000);
-              rows.push([propShort(p.id),b.guest,b.checkIn,b.checkOut,nights,b.channel||'',b.amount]);
-            });
-        });
-        var csv=rows.map(function(r){return r.map(function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\n');
-        var blob=new Blob([csv],{type:'text/csv'});
-        triggerDownload(blob,'guest-breakdown-'+label.replace(/\s+/g,'-')+'-'+reportMonth+'.csv');
-      }},['Download guest breakdown CSV']));
     }
+    panel.appendChild(el('button',{class:'ghost',style:'margin-top:14px',onclick:function(){
+      var csv='OWNER EARNINGS \u2014 '+label+' \u2014 '+reportMonth+'\n';
+      csv+='Line,Amount,% of sales\n';
+      csv+='Amount paid from Airbnb/Booking.com,'+r.gross.toFixed(2)+',100.0\n';
+      csv+='Management fee,'+(-r.mgmtFee).toFixed(2)+','+r.mgmtPct.toFixed(1)+'\n';
+      csv+='Maintenance expenses,'+(-r.maintenance).toFixed(2)+','+r.maintenancePct.toFixed(1)+'\n';
+      csv+='Replacement expenses,'+(-r.replacement).toFixed(2)+','+r.replacementPct.toFixed(1)+'\n';
+      csv+='Toiletries,'+(-r.toiletries).toFixed(2)+','+r.toiletriesPct.toFixed(1)+'\n';
+      csv+='Other expenses,'+(-r.other).toFixed(2)+','+r.otherPct.toFixed(1)+'\n';
+      csv+='Cleaning & laundry fee,'+(-r.cleaningLaundry).toFixed(2)+','+r.cleaningLaundryPct.toFixed(1)+'\n';
+      csv+='Net payout to owner,'+r.netOwner.toFixed(2)+',\n';
+      csv+='\n';
+      csv+='WHO STAYED \u2014 '+label+' \u2014 '+reportMonth+'\n';
+      csv+='Property,Guest,Check-in,Check-out,Nights,Booked via,Amount paid\n';
+      var esc=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+      relevantProps.forEach(function(p){
+        bookings.filter(function(b){return b.propertyId===p.id && monthKey(b.checkIn)===reportMonth;})
+          .sort(function(a,b){return a.checkIn.localeCompare(b.checkIn);})
+          .forEach(function(b){
+            var nights=Math.round((new Date(b.checkOut)-new Date(b.checkIn))/86400000);
+            csv+=[propShort(p.id),b.guest,b.checkIn,b.checkOut,nights,b.channel||'',b.amount].map(esc).join(',')+'\n';
+          });
+      });
+      var blob=new Blob([csv],{type:'text/csv'});
+      triggerDownload(blob,'owner-report-'+label.replace(/\s+/g,'-')+'-'+reportMonth+'.csv');
+    }},['Download full report (earnings + who stayed) as one CSV']));
 
     panel.appendChild(el('div',{style:'margin-top:24px;padding-top:16px;border-top:1px solid var(--line)'},[
       el('div',{class:'section-title',style:'font-size:13px'},['Sync to the Google Sheets owner-report template']),
