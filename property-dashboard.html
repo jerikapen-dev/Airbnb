@@ -619,6 +619,23 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     return flagged;
   }
 
+  function sameAmountBookingIds(){
+    var groups={};
+    bookings.forEach(function(b){
+      var amt=Number(b.amount||0);
+      if(!amt) return; // zero-amount rows (e.g. cleaning-only adjustments) aren't meaningful here
+      var key=amt.toFixed(2);
+      (groups[key]=groups[key]||[]).push(b);
+    });
+    var flagged={};
+    Object.keys(groups).forEach(function(key){
+      if(groups[key].length>1){
+        groups[key].forEach(function(b){ flagged[b.id]=groups[key].length; });
+      }
+    });
+    return flagged;
+  }
+
   function autoDeleteExactDuplicates(){
     var groups={};
     bookings.forEach(function(b){
@@ -1246,6 +1263,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     if(pendingBookingImport){ renderBookingImportReview(panel); return; }
     panel.appendChild(el('div',{class:'section-title'},['Bookings']));
     var dupFlags=duplicateBookingIds();
+    var sameAmountFlags=sameAmountBookingIds();
     var dupIds=Object.keys(dupFlags);
     var exactCount=dupIds.filter(function(id){return dupFlags[id].exact;}).length;
     var nearCount=dupIds.length-exactCount;
@@ -1373,7 +1391,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     ['Airbnb','Booking.com','Direct','Agoda','Other'].forEach(function(c){ if(channelsPresent.indexOf(c)===-1) channelsPresent.push(c); });
     panel.appendChild(pillToggleGroup('Status', [
       ['Upcoming','Upcoming'],['In stay','In stay'],['Completed','Completed'],
-      ['DUP_EXACT','Exact duplicates'],['DUP_NEAR','Different amount']
+      ['DUP_EXACT','Exact duplicates'],['DUP_NEAR','Different amount'],['SAME_AMOUNT','Same rate as another booking']
     ], bookingsFilterStatuses));
     panel.appendChild(pillToggleGroup('Channel', channelsPresent.map(function(c){return [c,c];}), bookingsFilterChannels));
 
@@ -1391,6 +1409,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
         var matchesAny=bookingsFilterStatuses.some(function(fs){
           if(fs==='DUP_EXACT') return !!(dupFlags[b.id] && dupFlags[b.id].exact);
           if(fs==='DUP_NEAR') return !!(dupFlags[b.id] && !dupFlags[b.id].exact);
+          if(fs==='SAME_AMOUNT') return !!sameAmountFlags[b.id];
           return state===fs;
         });
         if(!matchesAny) return false;
@@ -1475,6 +1494,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       var statusCell=[el('span',{class:'badge',style:badgeStyle},[state])];
       if(dupInfo && dupInfo.exact) statusCell.push(el('span',{class:'badge',style:'background:var(--amber-l);color:var(--amber);margin-left:6px'},['Duplicate']));
       else if(dupInfo) statusCell.push(el('span',{class:'badge',style:'background:var(--accent-l);color:var(--accent);margin-left:6px'},['Different amount']));
+      else if(sameAmountFlags[b.id]) statusCell.push(el('span',{class:'badge',style:'background:var(--line-soft);color:var(--ink-soft);margin-left:6px'},['Same rate']));
       var contactBits=[];
       if(b.phone) contactBits.push(b.phone);
       if(b.email) contactBits.push(b.email);
