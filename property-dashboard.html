@@ -1803,7 +1803,10 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     panel.appendChild(ownerReportBtnRow);
 
     panel.appendChild(el('div',{style:'margin-top:28px;padding-top:16px;border-top:1px solid var(--line)'},[
-      el('div',{class:'section-title'},['Reservations \u2014 '+reportMonth])
+      el('div',{class:'section-title'},['Who stayed \u2014 '+reportMonth])
+    ]));
+    panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin:-6px 0 12px'},[
+      'Full guest-by-guest breakdown for this owner\u2019s statement \u2014 every reservation, who stayed, how long, where the booking came from, and what was paid.'
     ]));
     var relevantProps = reportPropertyId==='ALL' ? props : props.filter(function(p){return p.id===reportPropertyId;});
     var anyReservations=false;
@@ -1812,24 +1815,30 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
         .sort(function(a,b){return a.checkIn.localeCompare(b.checkIn);});
       if(resv.length===0) return;
       anyReservations=true;
-      panel.appendChild(el('div',{style:'font-weight:600;font-size:13px;margin:14px 0 8px'},[propShort(p.id)+' ('+resv.length+' reservation'+(resv.length===1?'':'s')+')']));
+      var totalNights=resv.reduce(function(s,b){return s+Math.round((new Date(b.checkOut)-new Date(b.checkIn))/86400000);},0);
+      panel.appendChild(el('div',{style:'font-weight:600;font-size:13px;margin:14px 0 8px'},[
+        propShort(p.id)+' \u2014 '+resv.length+' guest'+(resv.length===1?'':'s')+' stayed, '+totalNights+' night'+(totalNights===1?'':'s')+' total'
+      ]));
       var rTbl=el('table');
       rTbl.appendChild(el('thead',{},[el('tr',{},[
-        el('th',{},['Guest']),el('th',{},['Check-in']),el('th',{},['Check-out']),el('th',{},['Amount'])
+        el('th',{},['Guest']),el('th',{},['Check-in']),el('th',{},['Check-out']),el('th',{},['Nights']),el('th',{},['Booked via']),el('th',{},['Amount paid'])
       ])]));
       var rTb=el('tbody');
       var subtotal=0;
       resv.forEach(function(b){
         subtotal+=Number(b.amount||0);
+        var nights=Math.round((new Date(b.checkOut)-new Date(b.checkIn))/86400000);
         rTb.appendChild(el('tr',{},[
           el('td',{},[b.guest]),
           el('td',{class:'mono'},[b.checkIn]),
           el('td',{class:'mono'},[b.checkOut]),
+          el('td',{class:'mono'},[String(nights)]),
+          el('td',{},[b.channel||'\u2014']),
           el('td',{class:'mono'},[fmt(b.amount)])
         ]));
       });
       rTb.appendChild(el('tr',{style:'background:var(--line-soft)'},[
-        el('td',{style:'font-weight:600'},['Subtotal']), el('td',{},['']), el('td',{},['']),
+        el('td',{style:'font-weight:600'},['Subtotal']), el('td',{},['']), el('td',{},['']), el('td',{},['']), el('td',{},[''] ),
         el('td',{class:'mono',style:'font-weight:600'},[fmt(subtotal)])
       ]));
       rTbl.appendChild(rTb);
@@ -1839,16 +1848,19 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       panel.appendChild(el('div',{class:'empty'},['No reservations for this period.']));
     }else{
       panel.appendChild(el('button',{class:'ghost',style:'margin-top:14px',onclick:function(){
-        var rows=[['Property','Guest','Check-in','Check-out','Amount']];
+        var rows=[['Property','Guest','Check-in','Check-out','Nights','Booked via','Amount paid']];
         relevantProps.forEach(function(p){
           bookings.filter(function(b){return b.propertyId===p.id && monthKey(b.checkIn)===reportMonth;})
             .sort(function(a,b){return a.checkIn.localeCompare(b.checkIn);})
-            .forEach(function(b){ rows.push([propShort(p.id),b.guest,b.checkIn,b.checkOut,b.amount]); });
+            .forEach(function(b){
+              var nights=Math.round((new Date(b.checkOut)-new Date(b.checkIn))/86400000);
+              rows.push([propShort(p.id),b.guest,b.checkIn,b.checkOut,nights,b.channel||'',b.amount]);
+            });
         });
         var csv=rows.map(function(r){return r.map(function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\n');
         var blob=new Blob([csv],{type:'text/csv'});
-        triggerDownload(blob,'reservations-'+label.replace(/\s+/g,'-')+'-'+reportMonth+'.csv');
-      }},['Download reservations CSV']));
+        triggerDownload(blob,'guest-breakdown-'+label.replace(/\s+/g,'-')+'-'+reportMonth+'.csv');
+      }},['Download guest breakdown CSV']));
     }
 
     panel.appendChild(el('div',{style:'margin-top:24px;padding-top:16px;border-top:1px solid var(--line)'},[
