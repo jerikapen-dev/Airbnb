@@ -1414,6 +1414,42 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     ])]));
     var tb=el('tbody');
     filtered.forEach(function(b){
+      if(editingBookingId===b.id){
+        var eProp=propSelect('editPropertyId'); eProp.value=b.propertyId;
+        var eGuest=el('input',{value:b.guest});
+        var ePhone=el('input',{value:b.phone||'',placeholder:'Phone'});
+        var eEmail=el('input',{value:b.email||'',placeholder:'Email'});
+        var eChannel=el('select',{});
+        ['Airbnb','Booking.com','Direct','Agoda','Other'].forEach(function(c){ eChannel.appendChild(el('option',{value:c},[c])); });
+        eChannel.value=b.channel;
+        var eCheckIn=el('input',{type:'date',value:b.checkIn});
+        var eCheckOut=el('input',{type:'date',value:b.checkOut});
+        var eAmount=el('input',{type:'number',step:'1',value:b.amount});
+        var editCell=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;padding:10px 0'},[
+          el('div',{class:'field',style:'min-width:160px'},[el('label',{},['Property']),eProp]),
+          el('div',{class:'field',style:'min-width:140px'},[el('label',{},['Guest']),eGuest]),
+          el('div',{class:'field',style:'min-width:120px'},[el('label',{},['Phone']),ePhone]),
+          el('div',{class:'field',style:'min-width:140px'},[el('label',{},['Email']),eEmail]),
+          el('div',{class:'field',style:'min-width:110px'},[el('label',{},['Channel']),eChannel]),
+          el('div',{class:'field',style:'min-width:130px'},[el('label',{},['Check-in']),eCheckIn]),
+          el('div',{class:'field',style:'min-width:130px'},[el('label',{},['Check-out']),eCheckOut]),
+          el('div',{class:'field',style:'min-width:100px'},[el('label',{},['Amount (\u20B1)']),eAmount]),
+          el('button',{type:'button',onclick:function(){
+            if(!eCheckIn.value||!eCheckOut.value){ alert('Check-in and check-out are required.'); return; }
+            if(eCheckOut.value<=eCheckIn.value){ alert('Check-out must be after check-in.'); return; }
+            pushUndoSnapshot();
+            b.propertyId=eProp.value; b.guest=eGuest.value.trim()||b.guest;
+            b.phone=ePhone.value.trim(); b.email=eEmail.value.trim();
+            b.channel=eChannel.value; b.checkIn=eCheckIn.value; b.checkOut=eCheckOut.value;
+            b.amount=Number(eAmount.value||0);
+            save('bookings',bookings);
+            editingBookingId=null; render();
+          }},['Save']),
+          el('button',{type:'button',class:'ghost',onclick:function(){ editingBookingId=null; render(); }},['Cancel'])
+        ]);
+        tb.appendChild(el('tr',{style:'background:var(--accent-l)'},[el('td',{colspan:'10'},[editCell])]));
+        return;
+      }
       var t=today();
       var state = t<b.checkIn ? 'Upcoming' : (t>=b.checkIn && t<b.checkOut ? 'In stay' : 'Completed');
       var badgeStyle = state==='Upcoming' ? 'background:var(--amber-l);color:var(--amber)' : state==='In stay' ? 'background:var(--teal-l);color:var(--teal)' : 'background:var(--green-l);color:var(--green)';
@@ -1441,10 +1477,15 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
         el('td',{class:'mono'},[b.checkOut]),
         el('td',{class:'mono'},[fmt(b.amount)]),
         el('td',{},statusCell),
-        el('td',{},[el('button',{class:'small ghost',onclick:function(){
-          bookings=bookings.filter(function(x){return x.id!==b.id;});
-          save('bookings',bookings); render();
-        }},['Remove'])])
+        el('td',{style:'display:flex;gap:6px'},[
+          el('button',{class:'small ghost',type:'button',onclick:function(){ editingBookingId=b.id; render(); }},['Edit']),
+          el('button',{class:'small ghost',type:'button',onclick:function(){
+            if(!confirm('Remove this booking for '+b.guest+'?')) return;
+            pushUndoSnapshot();
+            bookings=bookings.filter(function(x){return x.id!==b.id;});
+            save('bookings',bookings); render();
+          }},['Remove'])
+        ])
       ]));
     });
     tbl.appendChild(tb);
@@ -1596,6 +1637,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='', bookingsFilterProperty='ALL', bookingsFilterStatus='ALL', bookingsFilterChannel='ALL';
   var showPropertyBulkTools=false, showBookingsImport=false, showExpensesImport=false;
   var pendingBookingImport=null;
+  var editingBookingId=null;
   var overviewSelectedMonth=thisMonth();
   var bookingsSelected={};
   var dismissedConflicts={};
