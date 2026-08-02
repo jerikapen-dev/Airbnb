@@ -433,7 +433,12 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   function parseBookingsCandidates(text){
     var rows=parseCSV(text);
     var existingSignatures={};
-    bookings.forEach(function(b){ existingSignatures[bookingSignature(b.guest,b.checkIn,b.checkOut,b.amount)]=true; });
+    var existingByGuestDates={};
+    bookings.forEach(function(b){
+      existingSignatures[bookingSignature(b.guest,b.checkIn,b.checkOut,b.amount)]=true;
+      var gdKey=(b.guest||'').trim().toLowerCase()+'|'+b.checkIn+'|'+b.checkOut;
+      existingByGuestDates[gdKey]=b.amount;
+    });
     var candidates=[];
     rows.forEach(function(r){
       var propRaw=pick(r,['property','listing','property name','unit']);
@@ -458,8 +463,13 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       else if(!propertyId){ status='invalid'; reason='No matching property (add \u201c'+(propRaw||'\u2014')+'\u201d as a property or shortcut first)'; }
       else{
         var sig=bookingSignature(guest,checkIn,checkOut,amount);
+        var gdKey=(guest||'').trim().toLowerCase()+'|'+checkIn+'|'+checkOut;
         if(existingSignatures[sig]){ status='duplicate'; reason='Same guest, dates, and amount already on file'; }
-        else{ existingSignatures[sig]=true; }
+        else if(existingByGuestDates[gdKey]!==undefined){
+          status='review';
+          reason='Same guest & dates already on file, but a different amount (on file: \u20B1'+Number(existingByGuestDates[gdKey]).toFixed(0)+', this file: \u20B1'+amount.toFixed(0)+') \u2014 check before importing';
+        }
+        else{ existingSignatures[sig]=true; existingByGuestDates[gdKey]=amount; }
       }
       candidates.push({
         propertyId:propertyId, propertyLabel:propertyId?propShort(propertyId):(propRaw||'\u2014'),
@@ -472,7 +482,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   }
 
   function commitBookingsCandidates(candidates){
-    var toAdd=candidates.filter(function(c){ return c.selected && c.status==='ok'; });
+    var toAdd=candidates.filter(function(c){ return c.selected && (c.status==='ok'||c.status==='review'); });
     if(toAdd.length===0) return 0;
     pushUndoSnapshot();
     toAdd.forEach(function(c){
@@ -584,15 +594,26 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   }
 
   function duplicateBookingIds(){
-    var groups={};
+    var exactGroups={}, gdGroups={};
     bookings.forEach(function(b){
       var key=bookingSignature(b.guest,b.checkIn,b.checkOut,b.amount);
-      (groups[key]=groups[key]||[]).push(b);
+      (exactGroups[key]=exactGroups[key]||[]).push(b);
+      var gdKey=(b.guest||'').trim().toLowerCase()+'|'+b.checkIn+'|'+b.checkOut;
+      (gdGroups[gdKey]=gdGroups[gdKey]||[]).push(b);
     });
     var flagged={};
-    Object.keys(groups).forEach(function(key){
-      if(groups[key].length>1){
-        groups[key].forEach(function(b){ flagged[b.id]=groups[key].length; });
+    Object.keys(exactGroups).forEach(function(key){
+      if(exactGroups[key].length>1){
+        exactGroups[key].forEach(function(b){ flagged[b.id]={count:exactGroups[key].length, exact:true}; });
+      }
+    });
+    Object.keys(gdGroups).forEach(function(key){
+      var group=gdGroups[key];
+      if(group.length>1){
+        var amounts={}; group.forEach(function(b){ amounts[Number(b.amount||0).toFixed(2)]=1; });
+        if(Object.keys(amounts).length>1){
+          group.forEach(function(b){ if(!flagged[b.id]) flagged[b.id]={count:group.length, exact:false}; });
+        }
       }
     });
     return flagged;
@@ -1154,9 +1175,10 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   function renderBookingImportReview(panel){
     panel.appendChild(el('div',{class:'section-title'},['Review before importing']));
     var okCount=pendingBookingImport.filter(function(c){return c.status==='ok';}).length;
-    var selCount=pendingBookingImport.filter(function(c){return c.selected && c.status==='ok';}).length;
+    var reviewCount=pendingBookingImport.filter(function(c){return c.status==='review';}).length;
+    var selCount=pendingBookingImport.filter(function(c){return c.selected && c.status!=='invalid' && c.status!=='duplicate';}).length;
     panel.appendChild(el('div',{style:'font-size:13px;color:var(--muted);margin-bottom:16px;max-width:640px'},[
-      'Nothing has been added yet. '+pendingBookingImport.length+' row(s) found in the file, '+okCount+' ready to import ('+selCount+' selected below). Uncheck anything you don\u2019t want, then confirm.'
+      'Nothing has been added yet. '+pendingBookingImport.length+' row(s) found in the file, '+okCount+' ready to import'+(reviewCount>0?', '+reviewCount+' need a manual look (amount doesn\u2019t match what\u2019s on file for that guest/dates)':'')+'. '+selCount+' selected below \u2014 uncheck anything you don\u2019t want, then confirm.'
     ]));
     var tbl=el('table');
     tbl.appendChild(el('thead',{},[el('tr',{},[
@@ -1166,15 +1188,16 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     pendingBookingImport.forEach(function(c){
       var check=el('input',{type:'checkbox',style:'width:18px;height:18px;min-height:auto'});
       check.checked=c.selected;
-      check.disabled=(c.status!=='ok');
+      check.disabled=(c.status==='invalid'||c.status==='duplicate');
       check.addEventListener('change',function(){ c.selected=check.checked; render(); });
       var statusBadge;
       if(c.status==='ok') statusBadge=el('span',{class:'badge',style:'background:var(--green-l);color:var(--green)'},['Ready']);
       else if(c.status==='duplicate') statusBadge=el('span',{class:'badge',style:'background:var(--amber-l);color:var(--amber)'},['Duplicate']);
+      else if(c.status==='review') statusBadge=el('span',{class:'badge',style:'background:var(--accent-l);color:var(--accent)'},['Check amount']);
       else statusBadge=el('span',{class:'badge',style:'background:var(--rust-l);color:var(--rust)'},['Can\u2019t import']);
       var statusCell=[statusBadge];
       if(c.reason) statusCell.push(el('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:2px'},[c.reason]));
-      tb.appendChild(el('tr',{style:c.status==='ok'?'':'opacity:.6'},[
+      tb.appendChild(el('tr',{style:(c.status==='invalid'||c.status==='duplicate')?'opacity:.6':''},[
         el('td',{},[check]),
         el('td',{},[c.propertyLabel]),
         el('td',{},[c.guest]),
@@ -1202,12 +1225,17 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     if(pendingBookingImport){ renderBookingImportReview(panel); return; }
     panel.appendChild(el('div',{class:'section-title'},['Bookings']));
     var dupFlags=duplicateBookingIds();
-    var dupCount=Object.keys(dupFlags).length;
-    if(dupCount>0){
+    var dupIds=Object.keys(dupFlags);
+    var exactCount=dupIds.filter(function(id){return dupFlags[id].exact;}).length;
+    var nearCount=dupIds.length-exactCount;
+    if(dupIds.length>0){
       var dupBox=el('div',{style:'background:var(--amber-l);border:1px solid var(--amber);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px'});
-      dupBox.appendChild(el('div',{style:'font-weight:600;color:var(--amber);font-size:13px'},[
-        '\u26a0 '+dupCount+' booking'+(dupCount===1?'':'s')+' with matching guest, dates, and amount \u2014 likely duplicate'+(dupCount===1?'':'s')+' from a repeated CSV import. Flagged below.'
-      ]));
+      var msg='\u26a0 ';
+      if(exactCount>0) msg+=exactCount+' exact duplicate'+(exactCount===1?'':'s')+' (same guest, dates, and amount)';
+      if(exactCount>0 && nearCount>0) msg+=', and ';
+      if(nearCount>0) msg+=nearCount+' with matching guest & dates but a different amount (worth a second look)';
+      msg+='. Flagged below.';
+      dupBox.appendChild(el('div',{style:'font-weight:600;color:var(--amber);font-size:13px'},[msg]));
       panel.appendChild(dupBox);
     }
     var form=el('form',{class:'row',onsubmit:function(ev){
@@ -1326,9 +1354,11 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
         bookingsSelected[b.id]=selCheck.checked;
         render();
       });
-      var isDup=!!dupFlags[b.id];
+      var dupInfo=dupFlags[b.id];
+      var isDup=!!dupInfo;
       var statusCell=[el('span',{class:'badge',style:badgeStyle},[state])];
-      if(isDup) statusCell.push(el('span',{class:'badge',style:'background:var(--amber-l);color:var(--amber);margin-left:6px'},['Possible duplicate']));
+      if(dupInfo && dupInfo.exact) statusCell.push(el('span',{class:'badge',style:'background:var(--amber-l);color:var(--amber);margin-left:6px'},['Duplicate']));
+      else if(dupInfo) statusCell.push(el('span',{class:'badge',style:'background:var(--accent-l);color:var(--accent);margin-left:6px'},['Different amount']));
       var contactBits=[];
       if(b.phone) contactBits.push(b.phone);
       if(b.email) contactBits.push(b.email);
