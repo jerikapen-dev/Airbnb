@@ -1343,18 +1343,26 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     });
     statusFilterSel.value=bookingsFilterStatus;
     statusFilterSel.addEventListener('change',function(){bookingsFilterStatus=statusFilterSel.value;render();});
+    var channelFilterSel=el('select',{});
+    var channelsPresent=[]; bookings.forEach(function(b){ if(b.channel && channelsPresent.indexOf(b.channel)===-1) channelsPresent.push(b.channel); });
+    ['Airbnb','Booking.com','Direct','Agoda','Other'].forEach(function(c){ if(channelsPresent.indexOf(c)===-1) channelsPresent.push(c); });
+    channelFilterSel.appendChild(el('option',{value:'ALL'},['All channels']));
+    channelsPresent.forEach(function(c){ channelFilterSel.appendChild(el('option',{value:c},[c])); });
+    channelFilterSel.value=bookingsFilterChannel;
+    channelFilterSel.addEventListener('change',function(){bookingsFilterChannel=channelFilterSel.value;render();});
     var fromInp=el('input',{type:'date',value:bookingsFilterFrom});
     fromInp.addEventListener('change',function(){bookingsFilterFrom=fromInp.value;render();});
     var toInp=el('input',{type:'date',value:bookingsFilterTo});
     toInp.addEventListener('change',function(){bookingsFilterTo=toInp.value;render();});
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Search guest']),searchInp]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Listing']),propFilterSel]));
+    filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Channel']),channelFilterSel]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Status']),statusFilterSel]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Check-in from']),fromInp]));
     filterRow.appendChild(el('div',{class:'field'},[el('label',{},['Check-in to']),toInp]));
-    if(bookingsSearchQuery||bookingsFilterFrom||bookingsFilterTo||bookingsFilterProperty!=='ALL'||bookingsFilterStatus!=='ALL'){
+    if(bookingsSearchQuery||bookingsFilterFrom||bookingsFilterTo||bookingsFilterProperty!=='ALL'||bookingsFilterStatus!=='ALL'||bookingsFilterChannel!=='ALL'){
       filterRow.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
-        bookingsSearchQuery='';bookingsFilterFrom='';bookingsFilterTo='';bookingsFilterProperty='ALL';bookingsFilterStatus='ALL';render();
+        bookingsSearchQuery='';bookingsFilterFrom='';bookingsFilterTo='';bookingsFilterProperty='ALL';bookingsFilterStatus='ALL';bookingsFilterChannel='ALL';render();
       }},['Clear filters']));
     }
     panel.appendChild(filterRow);
@@ -1364,6 +1372,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     var filtered=sorted.filter(function(b){
       if(q && b.guest.toLowerCase().indexOf(q)===-1) return false;
       if(bookingsFilterProperty!=='ALL' && b.propertyId!==bookingsFilterProperty) return false;
+      if(bookingsFilterChannel!=='ALL' && b.channel!==bookingsFilterChannel) return false;
       if(bookingsFilterFrom && b.checkIn<bookingsFilterFrom) return false;
       if(bookingsFilterTo && b.checkIn>bookingsFilterTo) return false;
       if(bookingsFilterStatus!=='ALL'){
@@ -1392,9 +1401,16 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     panel.appendChild(bulkRow);
 
     if(filtered.length===0){panel.appendChild(el('div',{class:'empty'},['No bookings match this filter.']));return;}
+    var allFilteredSelected = filtered.length>0 && filtered.every(function(b){return !!bookingsSelected[b.id];});
+    var selectAllCheck=el('input',{type:'checkbox',style:'width:18px;height:18px;min-height:auto'});
+    selectAllCheck.checked=allFilteredSelected;
+    selectAllCheck.addEventListener('change',function(){
+      filtered.forEach(function(b){ bookingsSelected[b.id]=selectAllCheck.checked; });
+      render();
+    });
     var tbl=el('table');
     tbl.appendChild(el('thead',{},[el('tr',{},[
-      el('th',{},['']),el('th',{},['Property']),el('th',{},['Guest']),el('th',{},['Contact']),el('th',{},['Channel']),el('th',{},['Check-in']),el('th',{},['Check-out']),el('th',{},['Amount']),el('th',{},['Status']),el('th',{},[''])
+      el('th',{},[selectAllCheck]),el('th',{},['Property']),el('th',{},['Guest']),el('th',{},['Contact']),el('th',{},['Channel']),el('th',{},['Check-in']),el('th',{},['Check-out']),el('th',{},['Amount']),el('th',{},['Status']),el('th',{},[''])
     ])]));
     var tb=el('tbody');
     filtered.forEach(function(b){
@@ -1577,7 +1593,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   var payrollWeekStart=saturdayOnOrBefore(today());
   var scheduleWeekStart=saturdayOnOrBefore(today());
   var payrollBreakdownMonth=thisMonth();
-  var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='', bookingsFilterProperty='ALL', bookingsFilterStatus='ALL';
+  var bookingsSearchQuery='', bookingsFilterFrom='', bookingsFilterTo='', bookingsFilterProperty='ALL', bookingsFilterStatus='ALL', bookingsFilterChannel='ALL';
   var showPropertyBulkTools=false, showBookingsImport=false, showExpensesImport=false;
   var pendingBookingImport=null;
   var overviewSelectedMonth=thisMonth();
