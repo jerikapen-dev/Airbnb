@@ -104,13 +104,14 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
 <script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-storage-compat.js"></script>
 </head>
 <body>
 <div id="app"></div>
 <script>
 (function(){
   var LS_PREFIX='pmDashboard:';
-  var fsCache={}, fsDocRef=null, fsReady=false, currentUser=null, fsDb=null, fsUid=null;
+  var fsCache={}, fsDocRef=null, fsReady=false, currentUser=null, fsDb=null, fsUid=null, fsStorage=null;
 
   var storage={
     get:function(key){
@@ -258,31 +259,36 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     });
   }
 
+  function backupSlotNow(){
+    return new Date().getHours()<12 ? 'AM' : 'PM';
+  }
   function maybeAutoBackup(){
     if(!fsReady || !fsDb || !fsUid) return;
     var todayStr=today();
-    var lastKey='pmDashboard:lastAutoBackupDate:'+fsUid;
+    var slot=backupSlotNow();
+    var periodKey=todayStr+'_'+slot;
+    var lastKey='pmDashboard:lastAutoBackupPeriod:'+fsUid;
     var last=null;
     try{ last=localStorage.getItem(lastKey); }catch(e){}
-    if(last===todayStr) return;
+    if(last===periodKey) return;
     var backupDoc={
-      date:todayStr, savedAt:new Date().toISOString(),
+      date:todayStr, slot:slot, periodKey:periodKey, savedAt:new Date().toISOString(),
       properties:props, bookings:bookings, expenses:expenses, cleaners:cleaners,
       cleaningOverrides:cleaningOverrides, cleaningPayOverrides:cleaningPayOverrides,
       cleaningFeeOverrides:cleaningFeeOverrides, cleaningDone:cleaningDone,
       dismissedConflicts:dismissedConflicts, maintenanceIntervals:maintenanceIntervals
     };
-    fsDb.collection('dashboards').doc(fsUid).collection('backups').doc(todayStr).set(backupDoc).then(function(){
-      try{ localStorage.setItem(lastKey,todayStr); }catch(e){}
+    fsDb.collection('dashboards').doc(fsUid).collection('backups').doc(periodKey).set(backupDoc).then(function(){
+      try{ localStorage.setItem(lastKey,periodKey); }catch(e){}
       pruneOldAutoBackups();
     }).catch(function(e){ console.error('auto backup failed',e); });
   }
 
   function pruneOldAutoBackups(){
     if(!fsDb||!fsUid) return;
-    fsDb.collection('dashboards').doc(fsUid).collection('backups').orderBy('date','desc').get().then(function(qs){
-      if(qs.docs.length<=30) return;
-      qs.docs.slice(30).forEach(function(d){ d.ref.delete().catch(function(){}); });
+    fsDb.collection('dashboards').doc(fsUid).collection('backups').orderBy('periodKey','desc').get().then(function(qs){
+      if(qs.docs.length<=60) return; // 60 = 30 days × 2 backups/day
+      qs.docs.slice(60).forEach(function(d){ d.ref.delete().catch(function(){}); });
     }).catch(function(e){ console.error('prune backups failed',e); });
   }
 
@@ -296,6 +302,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     }
     var auth=firebase.auth();
     var db=firebase.firestore();
+    try{ fsStorage=firebase.storage(); }catch(e){ console.error('Firebase Storage not available — enable it in the Firebase Console to use proof-of-payment uploads.', e); }
     auth.onAuthStateChanged(function(user){
       if(!user){ renderAuthGate(auth); return; }
       currentUser=user;
@@ -353,6 +360,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   }
   var cleaningFeeOverrides={};
   var cleaningDone={};
+  var ownerAccounts={};
   var TURNOVER_DEFAULTS={'Studio':400,'1BR':500,'2BR':700,'3BR':800};
   var TURNOVER_PRESETS=[400,500,700,750];
   var CLEANING_FEE_PRESETS=[0,600,800,1550];
@@ -396,6 +404,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     try{var r9=await storage.get('cleaningFeeOverrides');cleaningFeeOverrides=r9?JSON.parse(r9.value):{};}catch(e){cleaningFeeOverrides={};}
     try{var r8=await storage.get('cleaningDone');cleaningDone=r8?JSON.parse(r8.value):{};}catch(e){cleaningDone={};}
     try{var r7=await storage.get('maintenanceIntervals');maintenanceIntervals=r7?JSON.parse(r7.value):{aircon:4,grease:1,rpt:12,utilities:1};}catch(e){maintenanceIntervals={aircon:4,grease:1,rpt:12,utilities:1};}
+    try{var r11=await storage.get('ownerAccounts');ownerAccounts=r11?JSON.parse(r11.value):{};}catch(e){ownerAccounts={};}
     loaded=true; render();
     if(fsReady) maybeAutoBackup();
   }
@@ -1024,19 +1033,21 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       ev.preventDefault();
       var name=form.querySelector('[name=name]').value.trim();
       var shortcut=form.querySelector('[name=shortcut]').value.trim();
+      var ownerName=form.querySelector('[name=ownerName]').value.trim();
       var type=form.querySelector('[name=type]').value;
       var cleanerIndex=Number(form.querySelector('[name=cleanerIndex]').value);
       var mgmtFeeRate=Number(form.querySelector('[name=mgmtFeeRate]').value);
       var turnoverRateVal=form.querySelector('[name=turnoverRate]').value;
       var cleaningFeeRateVal=form.querySelector('[name=cleaningFeeRate]').value;
       if(!name)return;
-      props.push({id:uid(),name:name,shortcut:shortcut||suggestShortcut(name),type:type,cleanerIndex:cleanerIndex,mgmtFeeRate:mgmtFeeRate,turnoverRate:turnoverRateVal?Number(turnoverRateVal):TURNOVER_DEFAULTS[type]||400,cleaningFeeRate:cleaningFeeRateVal?Number(cleaningFeeRateVal):CLEANING_FEE_DEFAULT});
+      props.push({id:uid(),name:name,shortcut:shortcut||suggestShortcut(name),ownerName:ownerName,type:type,cleanerIndex:cleanerIndex,mgmtFeeRate:mgmtFeeRate,turnoverRate:turnoverRateVal?Number(turnoverRateVal):TURNOVER_DEFAULTS[type]||400,cleaningFeeRate:cleaningFeeRateVal?Number(cleaningFeeRateVal):CLEANING_FEE_DEFAULT});
       save('properties',props);
       form.reset();
       render();
     }});
     form.appendChild(el('div',{class:'field'},[el('label',{},['Property name']),el('input',{name:'name',placeholder:'e.g. 2BR Penthouse | Mall Access \u00b7 Heart of Uptown Cebu'})]));
     form.appendChild(el('div',{class:'field'},[el('label',{},['Shortcut (optional)']),el('input',{name:'shortcut',placeholder:'e.g. Mall Access'})]));
+    form.appendChild(el('div',{class:'field'},[el('label',{},['Owner name']),el('input',{name:'ownerName',placeholder:'e.g. Mr. Santos'})]));
     form.appendChild(el('div',{class:'field'},[el('label',{},['Type']),
       (function(){var s=el('select',{name:'type'});['Studio','1BR','2BR','3BR'].forEach(function(o){s.appendChild(el('option',{value:o},[o]));});return s;})()
     ]));
@@ -1146,7 +1157,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
 
     if(props.length===0){panel.appendChild(el('div',{class:'empty'},['No properties added yet.']));return;}
     var tbl=el('table');
-    tbl.appendChild(el('thead',{},[el('tr',{},[el('th',{},['Name']),el('th',{},['Shortcut']),el('th',{},['Also known as (e.g. other marketing names)']),el('th',{},['Type']),el('th',{},['Turnover pay (\u20B1)']),el('th',{},['Management fee']),el('th',{},['Cleaning & laundry fee']),el('th',{},['Assigned cleaner']),el('th',{},[''])])]));
+    tbl.appendChild(el('thead',{},[el('tr',{},[el('th',{},['Name']),el('th',{},['Shortcut']),el('th',{},['Owner']),el('th',{},['Also known as (e.g. other marketing names)']),el('th',{},['Type']),el('th',{},['Turnover pay (\u20B1)']),el('th',{},['Management fee']),el('th',{},['Cleaning & laundry fee']),el('th',{},['Assigned cleaner']),el('th',{},[''])])]));
     var tb=el('tbody');
     props.forEach(function(p){
       var nameInp=el('input',{value:p.name,style:'min-width:200px'});
@@ -1165,6 +1176,12 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       var aliasInp=el('input',{value:(p.aliases||[]).join(', '),placeholder:'e.g. your Airbnb listing title, if different',style:'min-width:220px'});
       aliasInp.addEventListener('change',function(){
         p.aliases=aliasInp.value.split(',').map(function(s){return s.trim();}).filter(Boolean);
+        save('properties',props); render();
+      });
+
+      var ownerInp=el('input',{value:p.ownerName||'',placeholder:'e.g. Mr. Santos',style:'min-width:130px'});
+      ownerInp.addEventListener('change',function(){
+        p.ownerName=ownerInp.value.trim();
         save('properties',props); render();
       });
 
@@ -1247,6 +1264,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       tb.appendChild(el('tr',{},[
         el('td',{},[nameInp]),
         el('td',{},[shortInp]),
+        el('td',{},[ownerInp]),
         el('td',{},[aliasInp]),
         el('td',{},[typeSel]),
         el('td',{},[turnoverInp,turnoverList]),
@@ -1645,7 +1663,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       render();
     }});
     var propSel=propSelect('propertyId');
-    var categorySel=(function(){var s=el('select',{name:'category'});['Management fee','Toiletries','Cleaning','Deep cleaning','Grease trap','Aircon cleaning','Repairs','Replacement item','RPT','Staging/setup','Utilities','Other'].forEach(function(o){s.appendChild(el('option',{value:o},[o]));});return s;})();
+    var categorySel=(function(){var s=el('select',{name:'category'});['Management fee','Toiletries','Cleaning','Deep cleaning','Grease trap','Aircon cleaning','Repairs','Replacement item','RPT','Staging/setup','Electricity (VECO)','Water','Internet','Condo dues','Other'].forEach(function(o){s.appendChild(el('option',{value:o},[o]));});return s;})();
     var amountInp=el('input',{name:'amount',type:'number',step:'1',placeholder:'0'});
 
     form.appendChild(el('div',{class:'field'},[el('label',{},['Property']),propSel]));
@@ -1781,7 +1799,9 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   var EXPENSE_BUCKET={
     'Repairs':'maintenance', 'Grease trap':'maintenance', 'Aircon cleaning':'maintenance',
     'Replacement item':'replacement',
-    'Toiletries':'toiletries'
+    'Toiletries':'toiletries',
+    'Electricity (VECO)':'electricity', 'Water':'water', 'Internet':'internet',
+    'Condo dues':'condoDues'
   };
   function bucketFor(category){ return EXPENSE_BUCKET[category] || 'other'; }
 
@@ -1790,10 +1810,39 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     return checkoutsInMonth.reduce(function(sum,b,i){ return sum + buildCleaningTask(b,i).ownerFee; },0);
   }
 
+  function ownerPropertyIds(ownerName){
+    return props.filter(function(p){return (p.ownerName||'').trim()===ownerName;}).map(function(p){return p.id;});
+  }
+  function reportScopeProps(scope){
+    if(scope==='ALL') return props;
+    if(typeof scope==='string' && scope.indexOf('OWNER::')===0){
+      var ownerName=scope.slice(7);
+      return props.filter(function(p){return (p.ownerName||'').trim()===ownerName;});
+    }
+    return props.filter(function(p){return p.id===scope;});
+  }
+  function ownerKeyForReportScope(scope){
+    if(scope==='ALL') return null;
+    if(typeof scope==='string' && scope.indexOf('OWNER::')===0) return scope.slice(7);
+    var p=props.find(function(x){return x.id===scope;});
+    var name=p ? (p.ownerName||'').trim() : '';
+    return name || null;
+  }
+  function slugifyUsername(u){ return String(u||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,''); }
+  function ownerPortalToken(username,pin){ return slugifyUsername(username)+'__'+String(pin||'').trim(); }
+  function scopeMatchesProperty(scope,propertyId){
+    if(scope==='ALL') return true;
+    if(typeof scope==='string' && scope.indexOf('OWNER::')===0){
+      var ownerName=scope.slice(7);
+      return ownerPropertyIds(ownerName).indexOf(propertyId)>-1;
+    }
+    return propertyId===scope;
+  }
+
   function computeOwnerReport(propertyId,mk){
-    var relevantProps = propertyId==='ALL' ? props : props.filter(function(p){return p.id===propertyId;});
-    var bks = bookings.filter(function(b){return monthKey(b.checkIn)===mk && (propertyId==='ALL'||b.propertyId===propertyId);});
-    var exs = expenses.filter(function(e){return monthKey(e.date)===mk && (propertyId==='ALL'||e.propertyId===propertyId);});
+    var relevantProps = reportScopeProps(propertyId);
+    var bks = bookings.filter(function(b){return monthKey(b.checkIn)===mk && scopeMatchesProperty(propertyId,b.propertyId);});
+    var exs = expenses.filter(function(e){return monthKey(e.date)===mk && scopeMatchesProperty(propertyId,e.propertyId);});
     var gross = bks.reduce(function(s,b){return s+Number(b.amount||0);},0);
 
     var mgmtFee = relevantProps.reduce(function(sum,p){
@@ -1801,21 +1850,23 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       return sum + grossP*mgmtRateFor(p.id);
     },0);
 
-    var cleaningLaundry = computeCleaningFeeForMonth(propertyId,mk);
+    var cleaningLaundry = relevantProps.reduce(function(sum,p){ return sum + computeCleaningFeeForMonth(p.id,mk); },0);
 
-    var buckets={maintenance:0, replacement:0, toiletries:0, other:0};
+    var buckets={maintenance:0, replacement:0, toiletries:0, electricity:0, water:0, internet:0, condoDues:0, other:0};
     exs.forEach(function(e){
       if(e.ownExpense) return; // paid personally by the manager, never billed to the owner
       buckets[bucketFor(e.category)] += Number(e.amount||0);
     });
 
-    var totalExp = cleaningLaundry + buckets.maintenance + buckets.replacement + buckets.toiletries + buckets.other;
+    var totalExp = cleaningLaundry + buckets.maintenance + buckets.replacement + buckets.toiletries + buckets.electricity + buckets.water + buckets.internet + buckets.condoDues + buckets.other;
     var netOwner = gross - mgmtFee - totalExp;
     function pct(v){ return gross>0 ? (v/gross*100) : 0; }
     return {gross:gross, mgmtFee:mgmtFee, maintenance:buckets.maintenance, replacement:buckets.replacement,
-      toiletries:buckets.toiletries, other:buckets.other, cleaningLaundry:cleaningLaundry, totalExp:totalExp, netOwner:netOwner,
+      toiletries:buckets.toiletries, electricity:buckets.electricity, water:buckets.water, internet:buckets.internet, condoDues:buckets.condoDues, other:buckets.other,
+      cleaningLaundry:cleaningLaundry, totalExp:totalExp, netOwner:netOwner,
       mgmtPct:pct(mgmtFee), maintenancePct:pct(buckets.maintenance), replacementPct:pct(buckets.replacement),
-      toiletriesPct:pct(buckets.toiletries), otherPct:pct(buckets.other), cleaningLaundryPct:pct(cleaningLaundry), totalExpPct:pct(totalExp)};
+      toiletriesPct:pct(buckets.toiletries), electricityPct:pct(buckets.electricity), waterPct:pct(buckets.water), internetPct:pct(buckets.internet), condoDuesPct:pct(buckets.condoDues),
+      otherPct:pct(buckets.other), cleaningLaundryPct:pct(cleaningLaundry), totalExpPct:pct(totalExp)};
   }
 
   function computeMyEarnings(propertyId,mk){
@@ -1874,7 +1925,21 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     var controls=el('div',{class:'row',style:'display:flex;gap:12px;align-items:flex-end;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px'});
     var pSel=el('select',{});
     pSel.appendChild(el('option',{value:'ALL'},['All properties']));
-    props.forEach(function(p){pSel.appendChild(el('option',{value:p.id},[(p.shortcut&&p.shortcut.trim()&&p.shortcut.trim()!==p.name)?(p.shortcut+' \u2014 '+p.name):p.name]));});
+    var ownerCounts={};
+    props.forEach(function(p){ var o=(p.ownerName||'').trim(); if(o) ownerCounts[o]=(ownerCounts[o]||0)+1; });
+    var ownersWithMultiple=Object.keys(ownerCounts).filter(function(o){return ownerCounts[o]>1;}).sort();
+    if(ownersWithMultiple.length>0){
+      var ownerGroup=el('optgroup',{label:'By owner (combined, for owners with multiple properties)'});
+      ownersWithMultiple.forEach(function(o){ ownerGroup.appendChild(el('option',{value:'OWNER::'+o},[o+' \u2014 all '+ownerCounts[o]+' properties'])); });
+      pSel.appendChild(ownerGroup);
+    }
+    var propGroup=el('optgroup',{label:'By property'});
+    props.forEach(function(p){
+      var lbl=(p.shortcut&&p.shortcut.trim()&&p.shortcut.trim()!==p.name)?(p.shortcut+' \u2014 '+p.name):p.name;
+      if(p.ownerName&&p.ownerName.trim()) lbl+=' (Owner: '+p.ownerName.trim()+')';
+      propGroup.appendChild(el('option',{value:p.id},[lbl]));
+    });
+    pSel.appendChild(propGroup);
     pSel.value=reportPropertyId;
     pSel.addEventListener('change',function(){reportPropertyId=pSel.value;render();});
     var mInput=el('input',{type:'month',value:reportMonth});
@@ -1886,8 +1951,9 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     if(props.length===0){panel.appendChild(el('div',{class:'empty'},['Add properties to generate an owner report.']));return;}
 
     var r=computeOwnerReport(reportPropertyId,reportMonth);
-    var label = reportPropertyId==='ALL' ? 'All properties' : propName(reportPropertyId);
-    var shortLabel = reportPropertyId==='ALL' ? null : propShort(reportPropertyId);
+    var isOwnerScope = typeof reportPropertyId==='string' && reportPropertyId.indexOf('OWNER::')===0;
+    var label = reportPropertyId==='ALL' ? 'All properties' : (isOwnerScope ? reportPropertyId.slice(7)+' (all properties)' : propName(reportPropertyId));
+    var shortLabel = (reportPropertyId==='ALL'||isOwnerScope) ? null : propShort(reportPropertyId);
 
     var card=el('div',{style:'background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 20px;max-width:560px'});
     card.appendChild(el('div',{style:'font-family:Fraunces,serif;font-weight:600;font-size:16px;margin-bottom:2px'},[label + (shortLabel && shortLabel!==label ? ' \u00b7 '+shortLabel : '')]));
@@ -1907,6 +1973,10 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     card.appendChild(line('Maintenance expenses', -r.maintenance, r.maintenancePct));
     card.appendChild(line('Replacement expenses', -r.replacement, r.replacementPct));
     card.appendChild(line('Toiletries', -r.toiletries, r.toiletriesPct));
+    card.appendChild(line('Electricity (VECO)', -r.electricity, r.electricityPct));
+    card.appendChild(line('Water', -r.water, r.waterPct));
+    card.appendChild(line('Internet', -r.internet, r.internetPct));
+    card.appendChild(line('Condo dues', -r.condoDues, r.condoDuesPct));
     card.appendChild(line('Other expenses', -r.other, r.otherPct));
     card.appendChild(line('Cleaning & laundry fee', -r.cleaningLaundry, r.cleaningLaundryPct));
 
@@ -1926,7 +1996,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin:-6px 0 12px'},[
       'Full guest-by-guest breakdown for this owner\u2019s statement \u2014 every reservation, who stayed, how long, where the booking came from, and what was paid.'
     ]));
-    var relevantProps = reportPropertyId==='ALL' ? props : props.filter(function(p){return p.id===reportPropertyId;});
+    var relevantProps = reportScopeProps(reportPropertyId);
     var anyReservations=false;
     relevantProps.forEach(function(p){
       var resv=bookings.filter(function(b){return b.propertyId===p.id && monthKey(b.checkIn)===reportMonth;})
@@ -1973,6 +2043,10 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       csv+='Maintenance expenses,'+(-r.maintenance).toFixed(2)+','+r.maintenancePct.toFixed(1)+'\n';
       csv+='Replacement expenses,'+(-r.replacement).toFixed(2)+','+r.replacementPct.toFixed(1)+'\n';
       csv+='Toiletries,'+(-r.toiletries).toFixed(2)+','+r.toiletriesPct.toFixed(1)+'\n';
+      csv+='Electricity (VECO),'+(-r.electricity).toFixed(2)+','+r.electricityPct.toFixed(1)+'\n';
+      csv+='Water,'+(-r.water).toFixed(2)+','+r.waterPct.toFixed(1)+'\n';
+      csv+='Internet,'+(-r.internet).toFixed(2)+','+r.internetPct.toFixed(1)+'\n';
+      csv+='Condo dues,'+(-r.condoDues).toFixed(2)+','+r.condoDuesPct.toFixed(1)+'\n';
       csv+='Other expenses,'+(-r.other).toFixed(2)+','+r.otherPct.toFixed(1)+'\n';
       csv+='Cleaning & laundry fee,'+(-r.cleaningLaundry).toFixed(2)+','+r.cleaningLaundryPct.toFixed(1)+'\n';
       csv+='Net payout to owner,'+r.netOwner.toFixed(2)+',\n';
@@ -2014,6 +2088,101 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       downloadCSV('expenses-export.csv',rows);
     }},['Export expenses CSV']));
     panel.appendChild(syncRow);
+
+    panel.appendChild(el('div',{style:'margin-top:28px;padding-top:16px;border-top:1px solid var(--line)'},[
+      el('div',{class:'section-title'},['Owner portal'])
+    ]));
+    var ownerKey = ownerKeyForReportScope(reportPropertyId);
+    if(!ownerKey){
+      panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);max-width:560px'},[
+        'Set an Owner name for this property in the Properties tab (or pick a specific owner above) to let them log into their own view of this report.'
+      ]));
+    } else {
+      var acct = ownerAccounts[ownerKey] || {username:'',pin:'',email:''};
+      var portalCard = el('div',{style:'background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 20px;max-width:560px'});
+      portalCard.appendChild(el('div',{style:'font-weight:500;font-size:14px;margin-bottom:4px'},['Portal login for '+ownerKey]));
+      portalCard.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin-bottom:12px'},[
+        'Give this username and PIN to '+ownerKey+' — they use it to view only their own report, utility and condo dues breakdown, and proof of payment, at the owner-portal page (a separate link from your main dashboard).'
+      ]));
+      var userInp = el('input',{value:acct.username,placeholder:'Username, e.g. santos',style:'margin-bottom:8px'});
+      var pinInp = el('input',{value:acct.pin,placeholder:'PIN, e.g. 4 to 6 digits',style:'margin-bottom:8px'});
+      var emailInp = el('input',{value:acct.email,placeholder:'Owner email, for the email button below',type:'email',style:'margin-bottom:8px'});
+      function saveAcct(){
+        ownerAccounts[ownerKey] = {username:userInp.value.trim(), pin:pinInp.value.trim(), email:emailInp.value.trim()};
+        save('ownerAccounts',ownerAccounts);
+      }
+      userInp.addEventListener('change',saveAcct);
+      pinInp.addEventListener('change',saveAcct);
+      emailInp.addEventListener('change',saveAcct);
+      portalCard.appendChild(el('div',{class:'field'},[el('label',{},['Username']),userInp]));
+      portalCard.appendChild(el('div',{class:'field'},[el('label',{},['PIN']),pinInp]));
+      portalCard.appendChild(el('div',{class:'field'},[el('label',{},['Owner email']),emailInp]));
+
+      var proofFile = el('input',{type:'file',accept:'image/*,.pdf'});
+      var publishStatus = el('div',{style:'font-size:12px;color:var(--muted);margin-top:8px'});
+      portalCard.appendChild(el('div',{class:'field'},[el('label',{},['Proof of payment (photo or PDF, optional)']),proofFile]));
+
+      var btnRow=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-top:6px'});
+      var publishBtn = el('button',{type:'button'},['Publish this report to the owner portal']);
+      publishBtn.addEventListener('click', function(){
+        if(!userInp.value.trim() || !pinInp.value.trim()){ publishStatus.textContent='Set a username and PIN first, then try again.'; return; }
+        if(!fsReady || !fsDb){ publishStatus.textContent='Sync must be connected on this device to publish.'; return; }
+        saveAcct();
+        publishStatus.textContent='Publishing…';
+        var token = ownerPortalToken(userInp.value.trim(), pinInp.value.trim());
+        var scopeProps = reportScopeProps(reportPropertyId);
+        var reservations = [];
+        scopeProps.forEach(function(p){
+          bookings.filter(function(b){return b.propertyId===p.id && monthKey(b.checkIn)===reportMonth;})
+            .sort(function(a,b){return a.checkIn.localeCompare(b.checkIn);})
+            .forEach(function(b){
+              var nights=Math.round((new Date(b.checkOut)-new Date(b.checkIn))/86400000);
+              reservations.push({property:propShort(p.id), guest:b.guest, checkIn:b.checkIn, checkOut:b.checkOut, nights:nights, channel:b.channel||'', amount:Number(b.amount||0)});
+            });
+        });
+        function doPublish(proofUrl){
+          var monthPayload={
+            ownerName:ownerKey, label:label, month:reportMonth, report:r, reservations:reservations,
+            proofUrl: proofUrl!==undefined ? proofUrl : null,
+            publishedAt:new Date().toISOString(), sentAt:null
+          };
+          var parentPayload={ ownerName:ownerKey, username:userInp.value.trim(), latestMonth:reportMonth, updatedAt:new Date().toISOString() };
+          Promise.all([
+            fsDb.collection('ownerPortal').doc(token).set(parentPayload,{merge:true}),
+            fsDb.collection('ownerPortal').doc(token).collection('months').doc(reportMonth).set(monthPayload,{merge:true})
+          ]).then(function(){
+            publishStatus.textContent='Published'+(proofUrl?' with proof of payment attached.':'.')+' The owner can now view this (and all past published months) with their username and PIN.';
+          }).catch(function(e){ publishStatus.textContent='Could not publish: '+(e.message||e); });
+        }
+        var f = proofFile.files[0];
+        if(f && fsStorage){
+          var ref = fsStorage.ref().child('proofs/'+token+'/'+Date.now()+'_'+f.name);
+          ref.put(f).then(function(snap){ return snap.ref.getDownloadURL(); }).then(doPublish).catch(function(e){ publishStatus.textContent='Could not upload proof: '+(e.message||e); });
+        } else if(f && !fsStorage){
+          publishStatus.textContent='Firebase Storage isn’t enabled yet for this project — enable it in the Firebase Console (Build → Storage → Get started) to attach proof images, then try again.';
+        } else {
+          doPublish(null);
+        }
+      });
+      btnRow.appendChild(publishBtn);
+
+      var emailBtn = el('button',{class:'ghost',type:'button'},['Email owner — opens your Mail app']);
+      emailBtn.addEventListener('click', function(){
+        if(!emailInp.value.trim()){ publishStatus.textContent='Add the owner’s email above first.'; return; }
+        if(!userInp.value.trim() || !pinInp.value.trim()){ publishStatus.textContent='Set a username and PIN first.'; return; }
+        saveAcct();
+        var token = ownerPortalToken(userInp.value.trim(), pinInp.value.trim());
+        var portalUrl = location.href.replace(/[^\/]*$/, '') + 'owner-portal.html?u=' + encodeURIComponent(userInp.value.trim()) + '&p=' + encodeURIComponent(pinInp.value.trim());
+        var subject = ownerKey+' — '+reportMonth+' owner report';
+        var body = 'Hi '+ownerKey+',\n\nYour '+reportMonth+' owner report is ready. Net payout: '+fmt(r.netOwner)+'.\n\nView the full report and proof of payment here:\n'+portalUrl+'\n\n(Your login: username "'+userInp.value.trim()+'", PIN "'+pinInp.value.trim()+'" — the link above should log you in automatically.)\n\nThanks!';
+        window.location.href = 'mailto:'+encodeURIComponent(emailInp.value.trim())+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+        if(fsDb){ fsDb.collection('ownerPortal').doc(token).collection('months').doc(reportMonth).set({sentAt:new Date().toISOString()},{merge:true}).catch(function(){}); }
+      });
+      btnRow.appendChild(emailBtn);
+      portalCard.appendChild(btnRow);
+      portalCard.appendChild(publishStatus);
+      panel.appendChild(portalCard);
+    }
   }
 
   function renderMyEarnings(panel){
@@ -2552,28 +2721,29 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     acctCard.appendChild(signOutStatus);
     panel.appendChild(acctCard);
 
-    panel.appendChild(el('div',{class:'section-title'},['Automatic daily backups']));
+    panel.appendChild(el('div',{class:'section-title'},['Automatic backups (twice a day)']));
     panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin-bottom:12px;max-width:560px'},[
-      'Every day, the first time you open the dashboard, a snapshot of everything is saved automatically — no action needed. The last 30 days are kept. If something ever gets deleted or overwritten by mistake, you can restore to any of these points.'
+      'Every time you open the dashboard, a snapshot of everything is saved automatically — once in the morning (before noon) and once in the afternoon/evening (noon or later), whichever you haven’t already triggered that half of the day. No action needed. The last 30 days (up to 60 snapshots) are kept. If something ever gets deleted or overwritten by mistake, you can restore to any of these points.'
     ]));
     var autoBackupsWrap=el('div',{style:'max-width:560px;margin-bottom:24px'});
     if(fsReady && fsDb && fsUid){
       var loadingNote=el('div',{style:'font-size:12px;color:var(--muted)'},['Loading recent automatic backups…']);
       autoBackupsWrap.appendChild(loadingNote);
-      fsDb.collection('dashboards').doc(fsUid).collection('backups').orderBy('date','desc').limit(30).get().then(function(qs){
+      fsDb.collection('dashboards').doc(fsUid).collection('backups').orderBy('periodKey','desc').limit(60).get().then(function(qs){
         autoBackupsWrap.innerHTML='';
         if(qs.empty){
-          autoBackupsWrap.appendChild(el('div',{style:'font-size:12px;color:var(--muted)'},['No automatic backups yet — one will be saved the next time you open the dashboard. Check back tomorrow.']));
+          autoBackupsWrap.appendChild(el('div',{style:'font-size:12px;color:var(--muted)'},['No automatic backups yet — one will be saved the next time you open the dashboard.']));
           return;
         }
         qs.docs.forEach(function(d){
           var data=d.data();
           var row=el('div',{style:'display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:8px;background:#fff'});
+          var whenLabel=(data.date||d.id)+(data.slot?' '+data.slot:'');
           row.appendChild(el('div',{style:'font-size:13px'},[
-            d.id+' — '+(data.properties?data.properties.length:0)+' properties, '+(data.bookings?data.bookings.length:0)+' bookings, '+(data.expenses?data.expenses.length:0)+' expenses'
+            whenLabel+' — '+(data.properties?data.properties.length:0)+' properties, '+(data.bookings?data.bookings.length:0)+' bookings, '+(data.expenses?data.expenses.length:0)+' expenses'
           ]));
           row.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
-            if(!confirm('Restore the dashboard to how it was on '+d.id+'? This replaces everything currently here. (You can press Undo right after if this isn’t what you wanted.)')) return;
+            if(!confirm('Restore the dashboard to how it was on '+whenLabel+'? This replaces everything currently here. (You can press Undo right after if this isn’t what you wanted.)')) return;
             pushUndoSnapshot();
             props=data.properties||[]; bookings=data.bookings||[]; expenses=data.expenses||[];
             cleaners=data.cleaners||['Cleaner A','Cleaner B','Cleaner C','Cleaner D','Cleaner E','Cleaner F'];

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Owner Report</title>
+<style>
+  :root{
+    --paper:#FBFBFA; --paper-raised:#FFFFFF; --ink:#1C1C1A; --ink-soft:#8C8C86; --muted:#8C8C86;
+    --line:#EBEAE6; --accent:#3E6259; --accent-l:#EEF2F0; --green:#3E6259; --rust:#9C4A3C;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;background:var(--paper);color:var(--ink);}
+  input{width:100%;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:6px;margin-bottom:10px;box-sizing:border-box;}
+  button{font-size:14px;font-weight:500;padding:11px 16px;border-radius:6px;border:1px solid var(--ink);background:var(--ink);color:#fff;cursor:pointer;}
+  button.ghost{background:#fff;color:var(--ink);}
+  .field label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);}
+  .mono{font-variant-numeric:tabular-nums;}
+</style>
+</head>
+<body>
+<div id="app" style="max-width:640px;margin:0 auto;padding:24px 20px 60px;"></div>
+
+<!-- Firebase (same project as the main property dashboard) -->
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore-compat.js"></script>
+
+<script>
+(function(){
+  // ============================================================================
+  // PASTE YOUR FIREBASE CONFIG HERE — the SAME config object you pasted into
+  // the main property-dashboard.html when you set up sync. Copy it from the
+  // Firebase Console → Project settings → General → Your apps → SDK setup
+  // and configuration, and replace the object below. This is safe to put
+  // directly in this file — it is not a secret, access is controlled by your
+  // Firestore security rules, not by hiding this.
+  // ============================================================================
+  var FIREBASE_CONFIG = {
+    apiKey: "PASTE_YOUR_API_KEY_HERE",
+    authDomain: "PASTE_YOUR_AUTH_DOMAIN_HERE",
+    projectId: "PASTE_YOUR_PROJECT_ID_HERE",
+    storageBucket: "PASTE_YOUR_STORAGE_BUCKET_HERE",
+    messagingSenderId: "PASTE_YOUR_SENDER_ID_HERE",
+    appId: "PASTE_YOUR_APP_ID_HERE"
+  };
+  // ============================================================================
+
+  function fmt(n){ n=Number(n||0); return (n<0?'-':'')+'₱'+Math.abs(Math.round(n)).toLocaleString(); }
+  function slugifyUsername(u){ return String(u||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,''); }
+  function tokenFor(u,p){ return slugifyUsername(u)+'__'+String(p||'').trim(); }
+  function el(tag,attrs,children){
+    var e=document.createElement(tag);
+    attrs=attrs||{};
+    Object.keys(attrs).forEach(function(k){
+      if(k==='style') e.style.cssText=attrs[k];
+      else if(k.indexOf('on')===0 && typeof attrs[k]==='function') e.addEventListener(k.slice(2),attrs[k]);
+      else e.setAttribute(k,attrs[k]);
+    });
+    (children||[]).forEach(function(c){ if(c==null) return; e.appendChild(typeof c==='string'?document.createTextNode(c):c); });
+    return e;
+  }
+
+  var app=document.getElementById('app');
+  var db=null;
+
+  function showConfigError(){
+    app.innerHTML='';
+    app.appendChild(el('div',{style:'max-width:420px;margin:60px auto;text-align:center;color:var(--muted);font-size:13px;line-height:1.6'},[
+      el('div',{style:'font-family:Georgia,serif;font-size:20px;color:var(--ink);margin-bottom:10px'},['Setup needed']),
+      'This page hasn’t been connected to your property dashboard’s database yet. If you manage the dashboard: open this file, find the FIREBASE_CONFIG object near the top of the script, and paste in the same config you used for property-dashboard.html.'
+    ]));
+  }
+
+  try{
+    if(!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey.indexOf('PASTE_')===0){ showConfigError(); return; }
+    if(!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    db=firebase.firestore();
+  }catch(e){ showConfigError(); return; }
+
+  function renderLogin(prefill, errorMsg){
+    app.innerHTML='';
+    var wrap=el('div',{style:'max-width:380px;margin:60px auto;'});
+    wrap.appendChild(el('div',{style:'font-family:Georgia,serif;font-size:22px;margin-bottom:4px'},['Owner Report']));
+    wrap.appendChild(el('div',{style:'font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5'},['Enter the username and PIN given to you by your property manager.']));
+    var userInp=el('input',{placeholder:'Username',value:(prefill&&prefill.u)||''});
+    var pinInp=el('input',{placeholder:'PIN',type:'password',inputmode:'numeric',value:(prefill&&prefill.p)||''});
+    var errBox=el('div',{style:'color:var(--rust);font-size:12px;margin-bottom:10px'},[errorMsg||'']);
+    var btn=el('button',{style:'width:100%'},['View my report']);
+    btn.addEventListener('click',function(){ doLogin(userInp.value,pinInp.value); });
+    wrap.appendChild(userInp); wrap.appendChild(pinInp); wrap.appendChild(errBox); wrap.appendChild(btn);
+    app.appendChild(wrap);
+  }
+
+  function doLogin(u,p){
+    if(!u||!p){ renderLogin({u:u,p:p},'Enter both your username and PIN.'); return; }
+    var token=tokenFor(u,p);
+    app.innerHTML='<div style="max-width:380px;margin:80px auto;text-align:center;color:var(--muted);font-size:13px;">Loading…</div>';
+    db.collection('ownerPortal').doc(token).get().then(function(doc){
+      if(!doc.exists){ renderLogin({u:u,p:p},'That username and PIN don’t match a published report. Double-check with your property manager.'); return; }
+      return db.collection('ownerPortal').doc(token).collection('months').orderBy('month','desc').get().then(function(qs){
+        if(qs.empty){ renderLogin({u:u,p:p},'Your login works, but no report has been published yet. Check back after your property manager publishes one.'); return; }
+        var months=qs.docs.map(function(d){return d.data();});
+        renderReport(months, months[0].month);
+      });
+    }).catch(function(e){
+      renderLogin({u:u,p:p},'Could not load your report: '+(e.message||e));
+    });
+  }
+
+  function renderReport(months, selectedMonth){
+    app.innerHTML='';
+    var data=months.find(function(m){return m.month===selectedMonth;}) || months[0];
+    var r=data.report||{};
+    var wrap=el('div',{});
+    wrap.appendChild(el('div',{style:'font-family:Georgia,serif;font-size:20px;margin-bottom:2px'},[data.label||data.ownerName||'Owner report']));
+
+    if(months.length>1){
+      var tabRow=el('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 16px'});
+      months.forEach(function(m){
+        var isActive=m.month===selectedMonth;
+        var tabBtn=el('button',{class:isActive?'':'ghost',style:'padding:6px 12px;font-size:12px;'+(isActive?'':'background:#fff;')},[m.month]);
+        tabBtn.addEventListener('click',function(){ renderReport(months, m.month); });
+        tabRow.appendChild(tabBtn);
+      });
+      wrap.appendChild(tabRow);
+    }
+
+    wrap.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin-bottom:20px'},[
+      (data.month||'')+' · published '+(data.publishedAt?new Date(data.publishedAt).toLocaleDateString():'—')
+    ]));
+
+    var card=el('div',{style:'background:var(--paper-raised);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:20px'});
+    function line(lbl,val,strong){
+      var row=el('div',{style:'display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);gap:10px'});
+      row.appendChild(el('div',{style:(strong?'font-weight:500;':'')+'font-size:13px'},[lbl]));
+      row.appendChild(el('div',{class:'mono',style:(strong?'font-weight:500;font-size:15px':'font-size:13px')},[fmt(val)]));
+      return row;
+    }
+    card.appendChild(line('Amount paid from Airbnb/Booking.com', r.gross, true));
+    card.appendChild(line('Management fee', -(r.mgmtFee||0)));
+    card.appendChild(line('Maintenance expenses', -(r.maintenance||0)));
+    card.appendChild(line('Replacement expenses', -(r.replacement||0)));
+    card.appendChild(line('Toiletries', -(r.toiletries||0)));
+    card.appendChild(line('Electricity (VECO)', -(r.electricity||0)));
+    card.appendChild(line('Water', -(r.water||0)));
+    card.appendChild(line('Internet', -(r.internet||0)));
+    card.appendChild(line('Condo dues', -(r.condoDues||0)));
+    card.appendChild(line('Other expenses', -(r.other||0)));
+    card.appendChild(line('Cleaning & laundry fee', -(r.cleaningLaundry||0)));
+    var netRow=el('div',{style:'display:flex;justify-content:space-between;padding:12px 0 0'});
+    netRow.appendChild(el('div',{style:'font-weight:600;font-size:14px'},['Net payout to you']));
+    netRow.appendChild(el('div',{class:'mono',style:'font-weight:600;font-size:18px;color:'+((r.netOwner||0)<0?'var(--rust)':'var(--green)')},[fmt(r.netOwner)]));
+    card.appendChild(netRow);
+    wrap.appendChild(card);
+
+    var payCard=el('div',{style:'background:var(--paper-raised);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:20px'});
+    payCard.appendChild(el('div',{style:'font-weight:500;font-size:14px;margin-bottom:8px'},['Proof of payment']));
+    if(data.proofUrl){
+      if(/\.pdf($|\?)/i.test(data.proofUrl)){
+        payCard.appendChild(el('a',{href:data.proofUrl,target:'_blank',rel:'noopener'},['View payment proof (PDF)']));
+      } else {
+        var img=el('img',{src:data.proofUrl,style:'max-width:100%;border-radius:6px;border:1px solid var(--line)'});
+        payCard.appendChild(img);
+      }
+      if(data.sentAt) payCard.appendChild(el('div',{style:'font-size:11px;color:var(--muted);margin-top:8px'},['Sent to you on '+new Date(data.sentAt).toLocaleDateString()]));
+    } else {
+      payCard.appendChild(el('div',{style:'font-size:12px;color:var(--muted)'},['Not yet uploaded by your property manager.']));
+    }
+    wrap.appendChild(payCard);
+
+    if(data.reservations && data.reservations.length){
+      wrap.appendChild(el('div',{style:'font-weight:500;font-size:14px;margin-bottom:6px'},['Who stayed — '+(data.month||'')]));
+      var tbl=el('table');
+      tbl.appendChild(el('thead',{},[el('tr',{},[
+        el('th',{},['Property']),el('th',{},['Guest']),el('th',{},['Check-in']),el('th',{},['Check-out']),el('th',{},['Nights']),el('th',{},['Via']),el('th',{},['Amount'])
+      ])]));
+      var tb=el('tbody');
+      data.reservations.forEach(function(res){
+        tb.appendChild(el('tr',{},[
+          el('td',{},[res.property||'']), el('td',{},[res.guest||'']),
+          el('td',{class:'mono'},[res.checkIn||'']), el('td',{class:'mono'},[res.checkOut||'']),
+          el('td',{class:'mono'},[String(res.nights||'')]), el('td',{},[res.channel||'']),
+          el('td',{class:'mono'},[fmt(res.amount)])
+        ]));
+      });
+      tbl.appendChild(tb);
+      wrap.appendChild(tbl);
+    }
+
+    wrap.appendChild(el('button',{class:'ghost',style:'margin-top:20px',onclick:function(){ window.print(); }},['Print / Save as PDF']));
+    wrap.appendChild(el('div',{style:'margin-top:10px'},[
+      el('button',{class:'ghost',onclick:function(){ renderLogin(); }},['Log out'])
+    ]));
+    app.appendChild(wrap);
+  }
+
+  // Auto-login if the manager emailed a link with ?u=...&p=...
+  var params=new URLSearchParams(window.location.search);
+  if(params.get('u') && params.get('p')){
+    doLogin(params.get('u'), params.get('p'));
+  } else {
+    renderLogin();
+  }
+})();
+</script>
+</body>
+</html>
