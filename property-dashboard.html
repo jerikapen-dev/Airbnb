@@ -219,9 +219,31 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       });
     });
     signUpBtn.style.background='#fff'; signUpBtn.style.color='#1C1C1A';
+    var forgotBtn=document.createElement('button');
+    forgotBtn.textContent='Forgot password / not sure what email I used';
+    forgotBtn.type='button';
+    forgotBtn.style.cssText='width:100%;font-size:12px;padding:8px;border:none;background:transparent;color:#8C8C86;text-decoration:underline;cursor:pointer;margin-top:10px';
+    var forgotStatus=document.createElement('div');
+    forgotBtn.addEventListener('click',function(){
+      errBox.innerHTML=''; forgotStatus.innerHTML='';
+      var email=emailInp.value.trim();
+      if(!email){
+        forgotStatus.appendChild(gError('Type the email you think you used above first, then tap this again — we’ll send a reset link to it if an account exists.'));
+        return;
+      }
+      auth.sendPasswordResetEmail(email).then(function(){
+        var ok=document.createElement('div');
+        ok.style.cssText='color:#3E6259;font-size:12px;margin-top:8px';
+        ok.textContent='If an account exists for '+email+', a password reset link was just sent to it. Check that inbox (and spam folder).';
+        forgotStatus.appendChild(ok);
+      }).catch(function(e){
+        forgotStatus.appendChild(gError(e.message||'Could not send reset email.'));
+      });
+    });
     body.appendChild(signInBtn); body.appendChild(signUpBtn); body.appendChild(errBox);
+    body.appendChild(forgotBtn); body.appendChild(forgotStatus);
     app.innerHTML='';
-    app.appendChild(gateShell('Sign in','Use the same email and password on every device to see the same data everywhere. If you already created an account on another device, use "Sign in" here — do not press "Create account" again, or you’ll start a second, empty account.',body));
+    app.appendChild(gateShell('Sign in','Use the same email and password on every device to see the same data everywhere. If you already created an account on another device, use "Sign in" here — do not press "Create account" again, or you’ll start a second, empty account. Not sure which email you used the first time? Check the Account section on your original, working device — it now shows the exact email that device is signed in with.',body));
   }
 
   function startFirestoreSync(db,uid){
