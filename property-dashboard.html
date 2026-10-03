@@ -110,7 +110,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
 <script>
 (function(){
   var LS_PREFIX='pmDashboard:';
-  var fsCache={}, fsDocRef=null, fsReady=false, currentUser=null;
+  var fsCache={}, fsDocRef=null, fsReady=false, currentUser=null, fsDb=null, fsUid=null;
 
   var storage={
     get:function(key){
@@ -247,6 +247,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   }
 
   function startFirestoreSync(db,uid){
+    fsDb=db; fsUid=uid;
     fsDocRef=db.collection('dashboards').doc(uid);
     fsDocRef.onSnapshot(function(snap){
       fsCache=snap.exists?(snap.data()||{}):{};
@@ -255,6 +256,34 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     },function(err){
       console.error('Firestore sync error',err);
     });
+  }
+
+  function maybeAutoBackup(){
+    if(!fsReady || !fsDb || !fsUid) return;
+    var todayStr=today();
+    var lastKey='pmDashboard:lastAutoBackupDate:'+fsUid;
+    var last=null;
+    try{ last=localStorage.getItem(lastKey); }catch(e){}
+    if(last===todayStr) return;
+    var backupDoc={
+      date:todayStr, savedAt:new Date().toISOString(),
+      properties:props, bookings:bookings, expenses:expenses, cleaners:cleaners,
+      cleaningOverrides:cleaningOverrides, cleaningPayOverrides:cleaningPayOverrides,
+      cleaningFeeOverrides:cleaningFeeOverrides, cleaningDone:cleaningDone,
+      dismissedConflicts:dismissedConflicts, maintenanceIntervals:maintenanceIntervals
+    };
+    fsDb.collection('dashboards').doc(fsUid).collection('backups').doc(todayStr).set(backupDoc).then(function(){
+      try{ localStorage.setItem(lastKey,todayStr); }catch(e){}
+      pruneOldAutoBackups();
+    }).catch(function(e){ console.error('auto backup failed',e); });
+  }
+
+  function pruneOldAutoBackups(){
+    if(!fsDb||!fsUid) return;
+    fsDb.collection('dashboards').doc(fsUid).collection('backups').orderBy('date','desc').get().then(function(qs){
+      if(qs.docs.length<=30) return;
+      qs.docs.slice(30).forEach(function(d){ d.ref.delete().catch(function(){}); });
+    }).catch(function(e){ console.error('prune backups failed',e); });
   }
 
   function bootstrap(){
@@ -368,6 +397,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     try{var r8=await storage.get('cleaningDone');cleaningDone=r8?JSON.parse(r8.value):{};}catch(e){cleaningDone={};}
     try{var r7=await storage.get('maintenanceIntervals');maintenanceIntervals=r7?JSON.parse(r7.value):{aircon:4,grease:1,rpt:12,utilities:1};}catch(e){maintenanceIntervals={aircon:4,grease:1,rpt:12,utilities:1};}
     loaded=true; render();
+    if(fsReady) maybeAutoBackup();
   }
   async function save(key,val){
     try{await storage.set(key,JSON.stringify(val));}catch(e){console.error('save failed',key,e);}
@@ -452,7 +482,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     return (guest||'').trim().toLowerCase()+'|'+checkIn+'|'+checkOut+'|'+Number(amount||0).toFixed(2);
   }
 
-  function parseBookingsCandidates(text){
+  function parseBookingsCandidates(text,channelOverride){
     var rows=parseCSV(text);
     var existingSignatures={};
     var existingByGuestDates={};
@@ -474,7 +504,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       var guest=pick(r,['guest','guest name']);
       var phone=pick(r,['phone','phone number','contact number','mobile']);
       var email=pick(r,['email','email address']);
-      var channel=pick(r,['channel','platform','source']);
+      var channel=(channelOverride && channelOverride!=='auto') ? channelOverride : pick(r,['channel','platform','source']);
       if(!channel){
         if(r['service fee']!==undefined || r['gross earnings']!==undefined) channel='Airbnb';
         else if(r['payments service provider']!==undefined || r['booking number']!==undefined) channel='Booking.com';
@@ -495,6 +525,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       }
       candidates.push({
         propertyId:propertyId, propertyLabel:propertyId?propShort(propertyId):(propRaw||'\u2014'),
+        propRaw:propRaw, missingProperty:(!propertyId && !!checkIn && !!checkOut),
         guest:guest||'Guest', phone:phone, email:email, channel:channel,
         checkIn:checkIn, checkOut:checkOut, amount:amount,
         status:status, reason:reason, selected:(status==='ok')
@@ -1115,7 +1146,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
 
     if(props.length===0){panel.appendChild(el('div',{class:'empty'},['No properties added yet.']));return;}
     var tbl=el('table');
-    tbl.appendChild(el('thead',{},[el('tr',{},[el('th',{},['Name']),el('th',{},['Shortcut']),el('th',{},['Type']),el('th',{},['Turnover pay (\u20B1)']),el('th',{},['Management fee']),el('th',{},['Cleaning & laundry fee']),el('th',{},['Assigned cleaner']),el('th',{},[''])])]));
+    tbl.appendChild(el('thead',{},[el('tr',{},[el('th',{},['Name']),el('th',{},['Shortcut']),el('th',{},['Also known as (e.g. other marketing names)']),el('th',{},['Type']),el('th',{},['Turnover pay (\u20B1)']),el('th',{},['Management fee']),el('th',{},['Cleaning & laundry fee']),el('th',{},['Assigned cleaner']),el('th',{},[''])])]));
     var tb=el('tbody');
     props.forEach(function(p){
       var nameInp=el('input',{value:p.name,style:'min-width:200px'});
@@ -1128,6 +1159,12 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       var shortInp=el('input',{value:p.shortcut||'',placeholder:suggestShortcut(p.name),style:'min-width:110px'});
       shortInp.addEventListener('change',function(){
         p.shortcut=shortInp.value.trim();
+        save('properties',props); render();
+      });
+
+      var aliasInp=el('input',{value:(p.aliases||[]).join(', '),placeholder:'e.g. your Airbnb listing title, if different',style:'min-width:220px'});
+      aliasInp.addEventListener('change',function(){
+        p.aliases=aliasInp.value.split(',').map(function(s){return s.trim();}).filter(Boolean);
         save('properties',props); render();
       });
 
@@ -1210,6 +1247,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       tb.appendChild(el('tr',{},[
         el('td',{},[nameInp]),
         el('td',{},[shortInp]),
+        el('td',{},[aliasInp]),
         el('td',{},[typeSel]),
         el('td',{},[turnoverInp,turnoverList]),
         el('td',{},[feeSel]),
@@ -1258,11 +1296,43 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       else statusBadge=el('span',{class:'badge',style:'background:var(--rust-l);color:var(--rust)'},['Can\u2019t import']);
       var statusCell=[statusBadge];
       if(c.reason) statusCell.push(el('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:2px'},[c.reason]));
+      var propertyCell;
+      if(c.missingProperty){
+        var fixSel=el('select',{style:'font-size:12px;min-height:30px'});
+        fixSel.appendChild(el('option',{value:''},['Pick property\u2026']));
+        props.forEach(function(p){fixSel.appendChild(el('option',{value:p.id},[p.name]));});
+        var rememberCheck=el('input',{type:'checkbox',style:'width:14px;height:14px;min-height:auto'});
+        rememberCheck.checked=true;
+        var rememberLabel=el('label',{style:'display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);margin-top:4px'},[rememberCheck,'Remember \u201c'+(c.propRaw||'')+'\u201d for next time']);
+        fixSel.addEventListener('change',function(){
+          if(!fixSel.value) return;
+          var chosen=props.find(function(p){return p.id===fixSel.value;});
+          if(!chosen) return;
+          c.propertyId=chosen.id;
+          c.propertyLabel=propShort(chosen.id);
+          c.status='ok'; c.reason=''; c.selected=true; c.missingProperty=false;
+          if(rememberCheck.checked && c.propRaw){
+            chosen.aliases=chosen.aliases||[];
+            if(chosen.aliases.indexOf(c.propRaw)===-1 && c.propRaw.toLowerCase()!==chosen.name.toLowerCase()){
+              chosen.aliases.push(c.propRaw);
+              save('properties',props);
+            }
+          }
+          render();
+        });
+        propertyCell=el('div',{},[fixSel,rememberLabel]);
+      } else {
+        propertyCell=c.propertyLabel;
+      }
+      var channelSelRow=el('select',{style:'font-size:12px;min-height:30px'});
+      ['Airbnb','Booking.com','Direct','Agoda','Other'].forEach(function(o){channelSelRow.appendChild(el('option',{value:o},[o]));});
+      channelSelRow.value=['Airbnb','Booking.com','Direct','Agoda','Other'].indexOf(c.channel)>-1 ? c.channel : 'Other';
+      channelSelRow.addEventListener('change',function(){ c.channel=channelSelRow.value; });
       tb.appendChild(el('tr',{style:(c.status==='invalid'||c.status==='duplicate')?'opacity:.6':''},[
         el('td',{},[check]),
-        el('td',{},[c.propertyLabel]),
+        el('td',{},[propertyCell]),
         el('td',{},[c.guest]),
-        el('td',{},[c.channel]),
+        el('td',{},[channelSelRow]),
         el('td',{class:'mono'},[c.checkIn||'\u2014']),
         el('td',{class:'mono'},[c.checkOut||'\u2014']),
         el('td',{class:'mono'},[fmt(c.amount)]),
@@ -1350,9 +1420,15 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     }},[showBookingsImport?'\u2212 Hide CSV import':'+ Import from CSV']));
 
     if(showBookingsImport){
-    var importRow=el('div',{style:'display:flex;align-items:center;gap:10px;margin-bottom:16px;font-size:12px;color:var(--muted)'});
+    var importRow=el('div',{style:'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;color:var(--muted)'});
+    var channelSel=el('select',{style:'min-height:34px'});
+    [['auto','Auto-detect'],['Airbnb','Airbnb'],['Booking.com','Booking.com'],['Direct','Direct'],['Agoda','Agoda'],['Other','Other']].forEach(function(o){
+      channelSel.appendChild(el('option',{value:o[0]},[o[1]]));
+    });
     var fileInput=el('input',{type:'file',accept:'.csv'});
     var statusSpan=el('span',{},['Import a reservations CSV exported from Airbnb or Booking.com (property, guest, check-in, check-out, amount columns).']);
+    importRow.appendChild(el('span',{style:'font-weight:500;color:var(--ink)'},['Which platform is this file from?']));
+    importRow.appendChild(channelSel);
     importRow.appendChild(el('span',{style:'font-weight:500;color:var(--ink)'},['Import CSV:']));
     importRow.appendChild(fileInput);
     importRow.appendChild(statusSpan);
@@ -1360,7 +1436,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       var f=fileInput.files[0]; if(!f)return;
       var reader=new FileReader();
       reader.onload=function(){
-        pendingBookingImport=parseBookingsCandidates(String(reader.result));
+        pendingBookingImport=parseBookingsCandidates(String(reader.result),channelSel.value);
         render();
       };
       reader.readAsText(f);
@@ -2476,7 +2552,53 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     acctCard.appendChild(signOutStatus);
     panel.appendChild(acctCard);
 
-    panel.appendChild(el('div',{class:'section-title'},['Backup and restore']));
+    panel.appendChild(el('div',{class:'section-title'},['Automatic daily backups']));
+    panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin-bottom:12px;max-width:560px'},[
+      'Every day, the first time you open the dashboard, a snapshot of everything is saved automatically — no action needed. The last 30 days are kept. If something ever gets deleted or overwritten by mistake, you can restore to any of these points.'
+    ]));
+    var autoBackupsWrap=el('div',{style:'max-width:560px;margin-bottom:24px'});
+    if(fsReady && fsDb && fsUid){
+      var loadingNote=el('div',{style:'font-size:12px;color:var(--muted)'},['Loading recent automatic backups…']);
+      autoBackupsWrap.appendChild(loadingNote);
+      fsDb.collection('dashboards').doc(fsUid).collection('backups').orderBy('date','desc').limit(30).get().then(function(qs){
+        autoBackupsWrap.innerHTML='';
+        if(qs.empty){
+          autoBackupsWrap.appendChild(el('div',{style:'font-size:12px;color:var(--muted)'},['No automatic backups yet — one will be saved the next time you open the dashboard. Check back tomorrow.']));
+          return;
+        }
+        qs.docs.forEach(function(d){
+          var data=d.data();
+          var row=el('div',{style:'display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:8px;background:#fff'});
+          row.appendChild(el('div',{style:'font-size:13px'},[
+            d.id+' — '+(data.properties?data.properties.length:0)+' properties, '+(data.bookings?data.bookings.length:0)+' bookings, '+(data.expenses?data.expenses.length:0)+' expenses'
+          ]));
+          row.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
+            if(!confirm('Restore the dashboard to how it was on '+d.id+'? This replaces everything currently here. (You can press Undo right after if this isn’t what you wanted.)')) return;
+            pushUndoSnapshot();
+            props=data.properties||[]; bookings=data.bookings||[]; expenses=data.expenses||[];
+            cleaners=data.cleaners||['Cleaner A','Cleaner B','Cleaner C','Cleaner D','Cleaner E','Cleaner F'];
+            cleaningOverrides=data.cleaningOverrides||{}; cleaningPayOverrides=data.cleaningPayOverrides||{};
+            cleaningFeeOverrides=data.cleaningFeeOverrides||{}; cleaningDone=data.cleaningDone||{};
+            dismissedConflicts=data.dismissedConflicts||{}; maintenanceIntervals=data.maintenanceIntervals||{aircon:4,grease:1,rpt:12,utilities:1};
+            Promise.all([
+              save('properties',props), save('bookings',bookings), save('expenses',expenses),
+              save('cleaners',cleaners), save('cleaningOverrides',cleaningOverrides),
+              save('cleaningPayOverrides',cleaningPayOverrides), save('cleaningFeeOverrides',cleaningFeeOverrides),
+              save('cleaningDone',cleaningDone), save('dismissedConflicts',dismissedConflicts), save('maintenanceIntervals',maintenanceIntervals)
+            ]).then(function(){ render(); });
+          }},['Restore this version']));
+          autoBackupsWrap.appendChild(row);
+        });
+      }).catch(function(e){
+        autoBackupsWrap.innerHTML='';
+        autoBackupsWrap.appendChild(el('div',{style:'font-size:12px;color:var(--rust)'},['Could not load automatic backups: '+(e.message||e)]));
+      });
+    }else{
+      autoBackupsWrap.appendChild(el('div',{style:'font-size:12px;color:var(--muted)'},['Automatic backups need sync to be connected on this device.']));
+    }
+    panel.appendChild(autoBackupsWrap);
+
+    panel.appendChild(el('div',{class:'section-title'},['Manual backup and restore']));
 
     var LOCAL_KEYS=['properties','bookings','expenses','cleaners','cleaningOverrides','cleaningPayOverrides','cleaningFeeOverrides','cleaningDone','dismissedConflicts','maintenanceIntervals'];
     var foundLocal=[];
