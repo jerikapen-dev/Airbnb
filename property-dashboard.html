@@ -221,7 +221,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     signUpBtn.style.background='#fff'; signUpBtn.style.color='#1C1C1A';
     body.appendChild(signInBtn); body.appendChild(signUpBtn); body.appendChild(errBox);
     app.innerHTML='';
-    app.appendChild(gateShell('Sign in','Use the same email and password on every device to see the same data everywhere.',body));
+    app.appendChild(gateShell('Sign in','Use the same email and password on every device to see the same data everywhere. If you already created an account on another device, use "Sign in" here — do not press "Create account" again, or you’ll start a second, empty account.',body));
   }
 
   function startFirestoreSync(db,uid){
@@ -778,11 +778,12 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     if(undoStack.length===0) undoBtn.setAttribute('disabled','disabled');
     var redoBtn=el('button',{class:'ghost small',type:'button',onclick:doRedo},['\u21b7 Redo']);
     if(redoStack.length===0) redoBtn.setAttribute('disabled','disabled');
+    var acctBtn=el('button',{class:'ghost small',type:'button',title:(currentUser&&currentUser.email)?('Signed in as '+currentUser.email+' \u2014 click to switch account'):'',onclick:function(){activeTab='backup';render();}},[(currentUser&&currentUser.email)?currentUser.email:'Account']);
     root.appendChild(el('div',{class:'topbar'},[
       el('div',{class:'brand'},[
         el('div',{class:'eyebrow'},['Property Operations']),el('h1',{},['Portfolio dashboard']),el('p',{},[t.total+' properties tracked \u00b7 '+t.occ+' occupied today'])
       ]),
-      el('div',{style:'display:flex;gap:8px;align-items:center'},[undoBtn,redoBtn,el('button',{onclick:function(){activeTab='properties';render();}},['Manage properties'])])
+      el('div',{style:'display:flex;gap:8px;align-items:center'},[acctBtn,undoBtn,redoBtn,el('button',{onclick:function(){activeTab='properties';render();}},['Manage properties'])])
     ]));
     var m=el('div',{class:'metrics'});
     m.appendChild(el('div',{class:'metric'},[el('div',{class:'lbl'},['Revenue, this month']),el('div',{class:'val mono'},[fmt(t.rev)])]));
@@ -962,91 +963,6 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
 
     save('properties',props); save('bookings',bookings); save('expenses',expenses);
     return {merged:1, movedBookings:movedBookings, movedExpenses:movedExpenses, fromName:fromProp.name, intoName:intoProp.name};
-  }
-
-  function mergeIncomingData(data){
-    data = data || {};
-    var incomingProps = data.properties || [];
-    var incomingBookings = data.bookings || [];
-    var incomingExpenses = data.expenses || [];
-    var incomingCleaners = data.cleaners || [];
-    var incomingCleaningOverrides = data.cleaningOverrides || {};
-    var incomingCleaningPayOverrides = data.cleaningPayOverrides || {};
-    var incomingCleaningFeeOverrides = data.cleaningFeeOverrides || {};
-    var incomingCleaningDone = data.cleaningDone || {};
-
-    var idMap={};
-    var propsAdded=0;
-    incomingProps.forEach(function(p){
-      if(!p || !p.id) return;
-      var byId = props.find(function(x){return x.id===p.id;});
-      if(byId){ return; }
-      var byName = props.find(function(x){
-        return propAllNames(x).indexOf((p.name||'').toLowerCase())>-1;
-      });
-      if(byName){ idMap[p.id]=byName.id; return; }
-      props.push(p);
-      propsAdded++;
-    });
-    function remapPropId(pid){ return idMap[pid]!==undefined ? idMap[pid] : pid; }
-
-    var existingBookingIds={}, existingBookingSigs={};
-    bookings.forEach(function(b){
-      existingBookingIds[b.id]=true;
-      existingBookingSigs[bookingSignature(b.guest,b.checkIn,b.checkOut,b.amount)]=true;
-    });
-    var bookingsAdded=0, newBookingIds={};
-    incomingBookings.forEach(function(b){
-      if(!b || !b.id) return;
-      if(existingBookingIds[b.id]) return;
-      var sig=bookingSignature(b.guest,b.checkIn,b.checkOut,b.amount);
-      if(existingBookingSigs[sig]) return;
-      var nb={
-        id:b.id, propertyId:remapPropId(b.propertyId), guest:b.guest, phone:b.phone||'', email:b.email||'',
-        channel:b.channel||'Other', checkIn:b.checkIn, checkOut:b.checkOut, amount:Number(b.amount||0),
-        checkedIn:!!b.checkedIn, checkedOut:!!b.checkedOut
-      };
-      bookings.push(nb);
-      existingBookingIds[nb.id]=true;
-      existingBookingSigs[sig]=true;
-      newBookingIds[nb.id]=true;
-      bookingsAdded++;
-    });
-
-    function expenseSig(e){ return [e.propertyId,e.date,e.category,e.item||'',Number(e.amount||0).toFixed(2)].join('|'); }
-    var existingExpenseIds={}, existingExpenseSigs={};
-    expenses.forEach(function(e){
-      existingExpenseIds[e.id]=true;
-      existingExpenseSigs[expenseSig(e)]=true;
-    });
-    var expensesAdded=0;
-    incomingExpenses.forEach(function(e){
-      if(!e || !e.id) return;
-      if(existingExpenseIds[e.id]) return;
-      var remapped={ id:e.id, propertyId:remapPropId(e.propertyId), category:e.category, item:e.item, amount:Number(e.amount||0),
-        actualCost:(e.actualCost!==undefined&&e.actualCost!==null)?Number(e.actualCost):null, ownExpense:!!e.ownExpense,
-        hasReceipt:!!e.hasReceipt, date:e.date, note:e.note };
-      var sig=expenseSig(remapped);
-      if(existingExpenseSigs[sig]) return;
-      expenses.push(remapped);
-      existingExpenseIds[remapped.id]=true;
-      existingExpenseSigs[sig]=true;
-      expensesAdded++;
-    });
-
-    var cleanersAdded=0;
-    incomingCleaners.forEach(function(name){
-      if(!name) return;
-      var exists=cleaners.some(function(n){return n.toLowerCase()===String(name).toLowerCase();});
-      if(!exists){ cleaners.push(name); cleanersAdded++; }
-    });
-
-    Object.keys(incomingCleaningOverrides).forEach(function(bid){ if(newBookingIds[bid]) cleaningOverrides[bid]=incomingCleaningOverrides[bid]; });
-    Object.keys(incomingCleaningPayOverrides).forEach(function(bid){ if(newBookingIds[bid]) cleaningPayOverrides[bid]=incomingCleaningPayOverrides[bid]; });
-    Object.keys(incomingCleaningFeeOverrides).forEach(function(bid){ if(newBookingIds[bid]) cleaningFeeOverrides[bid]=incomingCleaningFeeOverrides[bid]; });
-    Object.keys(incomingCleaningDone).forEach(function(bid){ if(newBookingIds[bid]) cleaningDone[bid]=incomingCleaningDone[bid]; });
-
-    return {propsAdded:propsAdded, bookingsAdded:bookingsAdded, expensesAdded:expensesAdded, cleanersAdded:cleanersAdded};
   }
 
   function renderProperties(panel){
@@ -2167,6 +2083,23 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     });
   }
 
+  function computeCleaningHistoryByMonth(){
+    var monthTotals={};
+    bookings.forEach(function(b,i){
+      var mk=monthKey(b.checkOut);
+      var task=buildCleaningTask(b,i);
+      var m=monthTotals[mk]=monthTotals[mk]||{jobs:0, doneCount:0, pay:0, ownerFee:0};
+      m.jobs++;
+      if(task.done) m.doneCount++;
+      m.pay+=task.pay;
+      m.ownerFee+=task.ownerFee;
+    });
+    return Object.keys(monthTotals).sort().reverse().map(function(mk){
+      var m=monthTotals[mk];
+      return {month:mk, jobs:m.jobs, doneCount:m.doneCount, pay:m.pay, ownerFee:m.ownerFee};
+    });
+  }
+
   function renderCleaningSchedule(panel){
     panel.appendChild(el('div',{class:'section-title'},['Cleaning schedule']));
 
@@ -2395,6 +2328,42 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
         triggerDownload(blob,'monthly-cleaner-pay-'+payrollBreakdownMonth+'.csv');
       }},['Download monthly breakdown CSV']));
     }
+
+    panel.appendChild(el('div',{style:'margin-top:28px;padding-top:16px;border-top:1px solid var(--line)'},[
+      el('div',{class:'section-title'},['Cleaning history \u2014 every month'])
+    ]));
+    panel.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin-bottom:12px'},[
+      'Every month with a checkout on record, most recent first \u2014 for scanning back through past months in one view instead of paging week by week.'
+    ]));
+    var history=computeCleaningHistoryByMonth();
+    if(history.length===0){
+      panel.appendChild(el('div',{class:'empty'},['No cleaning history yet.']));
+    }else{
+      var hTbl=el('table');
+      hTbl.appendChild(el('thead',{},[el('tr',{},[
+        el('th',{},['Month']),el('th',{},['Cleanings']),el('th',{},['Marked done']),el('th',{},['Pay to cleaners']),el('th',{},['Owner fees collected'])
+      ])]));
+      var hTb=el('tbody');
+      history.forEach(function(h){
+        var mLabel=new Date(h.month+'-01T00:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric'});
+        hTb.appendChild(el('tr',{},[
+          el('td',{},[mLabel]),
+          el('td',{class:'mono'},[String(h.jobs)]),
+          el('td',{class:'mono'},[h.doneCount+' / '+h.jobs]),
+          el('td',{class:'mono'},[fmt(h.pay)]),
+          el('td',{class:'mono'},[fmt(h.ownerFee)])
+        ]));
+      });
+      hTbl.appendChild(hTb);
+      panel.appendChild(el('div',{class:'table-scroll'},[hTbl]));
+      panel.appendChild(el('button',{class:'ghost',style:'margin-top:14px',onclick:function(){
+        var rows=[['Month','Cleanings','Marked done','Pay to cleaners','Owner fees collected']];
+        history.forEach(function(h){ rows.push([h.month,h.jobs,h.doneCount,h.pay.toFixed(2),h.ownerFee.toFixed(2)]); });
+        var csv=rows.map(function(r){return r.map(function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\n');
+        var blob=new Blob([csv],{type:'text/csv'});
+        triggerDownload(blob,'cleaning-history-all-months.csv');
+      }},['Download full history CSV']));
+    }
   }
 
   function lastServiceDate(propertyId,category){
@@ -2462,6 +2431,29 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   }
 
   function renderBackup(panel){
+    panel.appendChild(el('div',{class:'section-title'},['Account']));
+    var acctCard=el('div',{style:'background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 20px;max-width:560px;margin-bottom:24px'});
+    acctCard.appendChild(el('div',{style:'font-weight:500;font-size:14px;margin-bottom:4px'},['Signed in']));
+    acctCard.appendChild(el('div',{style:'font-size:13px;color:var(--ink);margin-bottom:4px'},[(currentUser&&currentUser.email)?currentUser.email:'—']));
+    acctCard.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin-bottom:14px'},[
+      'Signed into the wrong account, or need to switch devices to a different login? Download a backup first if you’re not sure the other account has your data, then sign out below and sign back in with the correct email.'
+    ]));
+    var signOutStatus=el('div',{style:'font-size:12px;color:var(--rust);margin-top:8px'});
+    acctCard.appendChild(el('button',{class:'ghost',type:'button',onclick:function(){
+      if(!confirm('Sign out of this device? You can sign back in with the same or a different account.')) return;
+      try{
+        firebase.auth().signOut().then(function(){
+          location.reload();
+        }).catch(function(e){
+          signOutStatus.textContent='Could not sign out: '+(e.message||e);
+        });
+      }catch(e){
+        signOutStatus.textContent='Could not sign out: '+(e.message||e);
+      }
+    }},['Sign out']));
+    acctCard.appendChild(signOutStatus);
+    panel.appendChild(acctCard);
+
     panel.appendChild(el('div',{class:'section-title'},['Backup and restore']));
 
     var LOCAL_KEYS=['properties','bookings','expenses','cleaners','cleaningOverrides','cleaningPayOverrides','cleaningFeeOverrides','cleaningDone','dismissedConflicts','maintenanceIntervals'];
@@ -2476,34 +2468,24 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       var recoverCard=el('div',{style:'background:var(--amber-l);border:1px solid var(--amber);border-radius:10px;padding:16px 18px;max-width:560px;margin-bottom:20px'});
       recoverCard.appendChild(el('div',{style:'font-weight:600;font-size:13px;color:var(--amber);margin-bottom:6px'},['Data found on this device from before you connected sync']));
       recoverCard.appendChild(el('div',{style:'font-size:12px;color:var(--ink);margin-bottom:12px'},[
-        'Looks like this browser still has older data saved locally ('+foundLocal.join(', ')+'). This adds anything from that old local copy that isn\u2019t already in your synced account \u2014 duplicate bookings/expenses/properties are skipped automatically, and nothing currently in your synced account gets overwritten or deleted.'
+        'Looks like this browser still has older data saved locally ('+foundLocal.join(', ')+') that isn\u2019t in your synced account yet. Import it now \u2014 this only works on this device, so do it before using a different one.'
       ]));
       var recoverStatus=el('div',{style:'font-size:12px;color:var(--muted);margin-top:8px'});
       recoverCard.appendChild(el('button',{onclick:function(){
-        try{
-          var data={};
-          LOCAL_KEYS.forEach(function(k){
-            try{
-              var raw=localStorage.getItem('pmDashboard:'+k);
-              if(raw) data[k]=JSON.parse(raw);
-            }catch(e){}
-          });
-          pushUndoSnapshot();
-          var res=mergeIncomingData(data);
-          Promise.all([
-            save('properties',props), save('bookings',bookings), save('expenses',expenses), save('cleaners',cleaners),
-            save('cleaningOverrides',cleaningOverrides), save('cleaningPayOverrides',cleaningPayOverrides),
-            save('cleaningFeeOverrides',cleaningFeeOverrides), save('cleaningDone',cleaningDone)
-          ]).then(function(){
-            recoverStatus.textContent='Merged in '+res.propsAdded+' new propert'+(res.propsAdded===1?'y':'ies')+', '+res.bookingsAdded+' new booking'+(res.bookingsAdded===1?'':'s')+', '+res.expensesAdded+' new expense'+(res.expensesAdded===1?'':'s')+', '+res.cleanersAdded+' new cleaner'+(res.cleanersAdded===1?'':'s')+'. Nothing was overwritten or deleted \u2014 use Undo at the top of the page if you need to reverse this.';
-            render();
-          }).catch(function(err){
-            recoverStatus.textContent='Something went wrong saving: '+err.message;
-          });
-        }catch(err){
+        var writes=[];
+        LOCAL_KEYS.forEach(function(k){
+          try{
+            var raw=localStorage.getItem('pmDashboard:'+k);
+            if(raw) writes.push(storage.set(k,raw));
+          }catch(e){}
+        });
+        Promise.all(writes).then(function(){
+          recoverStatus.textContent='Imported successfully. Reloading\u2026';
+          setTimeout(function(){ location.reload(); }, 800);
+        }).catch(function(err){
           recoverStatus.textContent='Something went wrong: '+err.message;
-        }
-      }},['Merge this device\u2019s saved data in (safe \u2014 adds only)']));
+        });
+      }},['Import this device\u2019s saved data']));
       recoverCard.appendChild(recoverStatus);
       panel.appendChild(recoverCard);
     }
@@ -2531,7 +2513,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
 
     var restoreCard=el('div',{style:'background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 20px;max-width:560px;margin-top:16px'});
     restoreCard.appendChild(el('div',{style:'font-weight:500;font-size:14px;margin-bottom:4px'},['Restore from backup']));
-    restoreCard.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin-bottom:12px'},['Adds anything in the backup file that isn\u2019t already here \u2014 duplicate bookings, expenses, and properties are skipped automatically, and nothing currently in the dashboard gets overwritten or deleted.']));
+    restoreCard.appendChild(el('div',{style:'font-size:12px;color:var(--muted);margin-bottom:12px'},['This replaces everything currently in this dashboard with what\u2019s in the backup file. Only do this if you mean to overwrite current data.']));
     var fileInput=el('input',{type:'file',accept:'.json'});
     var statusSpan=el('div',{style:'font-size:12px;color:var(--muted);margin-top:8px'});
     fileInput.addEventListener('change',function(){
@@ -2541,40 +2523,6 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
         try{
           var data=JSON.parse(String(reader.result));
           if(!data||typeof data!=='object') throw new Error('bad file');
-          pushUndoSnapshot();
-          var res=mergeIncomingData(data);
-          Promise.all([
-            save('properties',props), save('bookings',bookings), save('expenses',expenses), save('cleaners',cleaners),
-            save('cleaningOverrides',cleaningOverrides), save('cleaningPayOverrides',cleaningPayOverrides),
-            save('cleaningFeeOverrides',cleaningFeeOverrides), save('cleaningDone',cleaningDone)
-          ]).then(function(){
-            statusSpan.textContent='Merged in '+res.propsAdded+' propert'+(res.propsAdded===1?'y':'ies')+', '+res.bookingsAdded+' booking'+(res.bookingsAdded===1?'':'s')+', '+res.expensesAdded+' expense'+(res.expensesAdded===1?'':'s')+', '+res.cleanersAdded+' cleaner'+(res.cleanersAdded===1?'':'s')+'. Use Undo at the top of the page if you need to reverse this.';
-            render();
-          });
-        }catch(err){
-          statusSpan.textContent='Could not read that file \u2014 make sure it\u2019s a backup downloaded from this dashboard.';
-        }
-      };
-      reader.readAsText(f);
-    });
-    restoreCard.appendChild(fileInput);
-    restoreCard.appendChild(statusSpan);
-    panel.appendChild(restoreCard);
-
-    var replaceCard=el('div',{style:'background:var(--rust-l);border:1px solid var(--rust);border-radius:10px;padding:16px 18px;max-width:560px;margin-top:16px'});
-    replaceCard.appendChild(el('div',{style:'font-weight:500;font-size:13px;color:var(--rust);margin-bottom:4px'},['Replace everything instead (dangerous)']));
-    replaceCard.appendChild(el('div',{style:'font-size:12px;color:var(--ink);margin-bottom:10px'},['Only use this if you deliberately want to wipe current data and load an old snapshot exactly as-is. Anything not in the file gets deleted. You can Undo right after if this was a mistake, as long as you don\u2019t close the tab first.']));
-    var replaceFileInput=el('input',{type:'file',accept:'.json'});
-    var replaceStatus=el('div',{style:'font-size:12px;color:var(--muted);margin-top:8px'});
-    replaceFileInput.addEventListener('change',function(){
-      var f=replaceFileInput.files[0]; if(!f)return;
-      if(!confirm('This will DELETE everything currently in the dashboard and replace it with the backup file. Are you sure?')){ replaceFileInput.value=''; return; }
-      var reader=new FileReader();
-      reader.onload=function(){
-        try{
-          var data=JSON.parse(String(reader.result));
-          if(!data||typeof data!=='object') throw new Error('bad file');
-          pushUndoSnapshot();
           props = data.properties||[];
           bookings = data.bookings||[];
           expenses = data.expenses||[];
@@ -2590,18 +2538,18 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
             save('cleaners',cleaners), save('cleaningOverrides',cleaningOverrides),
             save('cleaningPayOverrides',cleaningPayOverrides), save('cleaningFeeOverrides',cleaningFeeOverrides), save('cleaningDone',cleaningDone), save('dismissedConflicts',dismissedConflicts), save('maintenanceIntervals',maintenanceIntervals)
           ]).then(function(){
-            replaceStatus.textContent='Replaced: '+props.length+' properties, '+bookings.length+' bookings, '+expenses.length+' expenses. Use Undo at the top of the page if this was a mistake.';
+            statusSpan.textContent='Restored: '+props.length+' properties, '+bookings.length+' bookings, '+expenses.length+' expenses.';
             render();
           });
         }catch(err){
-          replaceStatus.textContent='Could not read that file.';
+          statusSpan.textContent='Could not read that file \u2014 make sure it\u2019s a backup downloaded from this dashboard.';
         }
       };
       reader.readAsText(f);
     });
-    replaceCard.appendChild(replaceFileInput);
-    replaceCard.appendChild(replaceStatus);
-    panel.appendChild(replaceCard);
+    restoreCard.appendChild(fileInput);
+    restoreCard.appendChild(statusSpan);
+    panel.appendChild(restoreCard);
   }
 
   function render(){
