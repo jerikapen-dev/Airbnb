@@ -2929,7 +2929,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
 
   function normalizeCalSync(c){
     c=c||{};
-    return {proxyUrl:c.proxyUrl||'',proxyKey:c.proxyKey||'',feeds:c.feeds||{},events:c.events||{},lastSync:c.lastSync||'',lastErrors:c.lastErrors||{},dismissed:c.dismissed||{},blocks:c.blocks||[],feedToken:c.feedToken||'',includeChannelBookings:c.includeChannelBookings||{},lastPublish:c.lastPublish||'',sheet:c.sheet||{}};
+    return {proxyUrl:c.proxyUrl||'',proxyKey:c.proxyKey||'',feeds:c.feeds||{},events:c.events||{},lastSync:c.lastSync||'',lastErrors:c.lastErrors||{},dismissed:c.dismissed||{},blocks:c.blocks||[],feedToken:c.feedToken||'',includeChannelBookings:c.includeChannelBookings||{},lastPublish:c.lastPublish||'',sheet:c.sheet||{},market:c.market||{rows:[],requests:[],lastFetch:''}};
   }
   function saveCalSync(){ return save('calSync',calSync); }
   function randomKey(){ var a='abcdefghjkmnpqrstuvwxyz23456789',k=''; for(var i=0;i<20;i++) k+=a[Math.floor(Math.random()*a.length)]; return k; }
@@ -3011,7 +3011,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       var nErr=Object.keys(errors).length;
       calSyncMsg=nErr?('Synced with '+nErr+' problem'+(nErr>1?'s':'')+' — see below.'):'Synced just now.';
       return saveCalSync();
-    }).then(function(){ return syncSheet(true); }).then(function(){ render(); return publishFeeds(); });
+    }).then(function(){ return syncSheet(true); }).then(function(){ return syncMarket(true); }).then(function(){ render(); return publishFeeds(); });
   }
   function maybeAutoSyncCalendars(){
     if(calAutoTried || !calSync.proxyUrl) return;
@@ -3046,7 +3046,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     bookings.push({id:uid(),propertyId:pid,guest:guest,phone:ev.phone4?('…'+ev.phone4):'',email:'',channel:feedLabel(ev.feed),checkIn:ev.start,checkOut:ev.end,amount:0,checkedIn:false,checkedOut:false,source:'ical',icalUid:ev.uid});
   }
 
-  var SCRIPT_VERSION=3;
+  var SCRIPT_VERSION=4;
   function scriptCode(){
     return [
       "// Calendar relay for your property dashboard (version "+SCRIPT_VERSION+").",
@@ -3054,11 +3054,14 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       "// 2) Serves a calendar link per property with the dates you block in the dashboard,",
       "//    so Airbnb and Booking.com can import it and block those dates too.",
       "// 3) Reads the Bookings tab of your website bookings sheet (booking details only, no payment proofs or IDs).",
+      "// 4) Reads the competitor checks Claude saves in your Drive folder, and records your check requests.",
       "var KEY = '"+calSync.proxyKey+"';",
       "var VERSION = "+SCRIPT_VERSION+";",
       "var SHEET_ID = '"+((calSync.sheet&&calSync.sheet.id)||'')+"';",
       "var SHEET_TAB = '"+((calSync.sheet&&calSync.sheet.tab)||'Bookings')+"';",
       "var SHEET_COLUMNS = "+JSON.stringify(SHEET_KEEP_COLS)+";",
+      "var ARCHIVE_TAB = 'BookingsArchive';",
+      "var COMP_FOLDER_ID = '"+(calSync.compFolderId||'1BE1qwsUTvLcABFuWybsH3WXBj9fDtFz6')+"';",
       "var ALLOWED = [/^https:\\/\\/([a-z0-9-]+\\.)*airbnb\\.[a-z.]+\\//i, /^https:\\/\\/([a-z0-9-]+\\.)*booking\\.com\\//i, /^https:\\/\\/([a-z0-9-]+\\.)*agoda\\.com\\//i];",
       "",
       "function doGet(e) {",
@@ -3067,6 +3070,8 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       "  if (p.key !== KEY) return out({ ok: false, error: 'Wrong key — paste the latest code from the dashboard.' });",
       "  if (p.ping) return out({ ok: true, version: VERSION });",
       "  if (p.sheet) return out(readSheet());",
+      "  if (p.comps) return out(readComps());",
+      "  if (p.request) return out(addRequest(p.units, p.note));",
       "  var url = p.url || '';",
       "  if (!ALLOWED.some(function (r) { return r.test(url); })) return out({ ok: false, error: 'Only Airbnb, Booking.com or Agoda calendar links are allowed.' });",
       "  try {",
@@ -3121,16 +3126,158 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       "      SHEET_COLUMNS.forEach(function (k) { var j = head.indexOf(k); if (j > -1) { o[k] = v[i][j]; if (v[i][j] !== '') any = true; } });",
       "      if (any) rows.push(o);",
       "    }",
-      "    return { ok: true, version: VERSION, rows: rows };",
+      "    var archive = [];",
+      "    var ar = SpreadsheetApp.openById(SHEET_ID).getSheetByName(ARCHIVE_TAB);",
+      "    if (ar && ar.getLastRow() > 1) {",
+      "      var tz = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();",
+      "      ar.getRange(2, 1, ar.getLastRow() - 1, ar.getLastColumn()).getValues().forEach(function (r) {",
+      "        var clean = r.map(function (c) { return cleanCell(c, tz); });",
+      "        if (clean.some(function (c) { return c !== ''; })) archive.push(clean);",
+      "      });",
+      "    }",
+      "    return { ok: true, version: VERSION, rows: rows, archive: archive };",
       "  } catch (err) {",
       "    return { ok: false, version: VERSION, error: String(err) };",
       "  }",
+      "}",
+      "",
+      "function compFiles() {",
+      "  var folder = DriveApp.getFolderById(COMP_FOLDER_ID), it = folder.getFiles(), results = [], req = null;",
+      "  while (it.hasNext()) {",
+      "    var f = it.next(), t = f.getName();",
+      "    if (f.getMimeType() !== MimeType.GOOGLE_SHEETS) continue;",
+      "    if (/^Competitor Prices/.test(t)) results.push(f); else if (t === 'Check requests') req = f;",
+      "  }",
+      "  results.sort(function (a, b) { return a.getName() < b.getName() ? 1 : -1; });",
+      "  return { folder: folder, results: results, req: req };",
+      "}",
+      "",
+      "function readComps() {",
+      "  try {",
+      "    var cf = compFiles(), rows = [], done = {};",
+      "    cf.results.forEach(function (f) { (f.getName().match(/req-[A-Za-z0-9]+/g) || []).forEach(function (x) { done[x.slice(4)] = true; }); });",
+      "    cf.results.slice(0, 8).forEach(function (f) {",
+      "      var v = SpreadsheetApp.open(f).getSheets()[0].getDataRange().getDisplayValues();",
+      "      var h = v[0].map(function (x) { return String(x).trim().toLowerCase(); });",
+      "      var col = function (name) { for (var i = 0; i < h.length; i++) if (h[i].indexOf(name) === 0) return i; return -1; };",
+      "      var c = { d: col('checked on'), u: col('dashboard unit'), n: col('listing name'), l: col('link'), s: col('source'), p: col('price php'), z: col('bedrooms'), a: col('area'), o: col('notes') };",
+      "      for (var i = 1; i < v.length; i++) {",
+      "        var r = v[i]; if (!r[c.n]) continue;",
+      "        rows.push({ checkedOn: r[c.d], unit: r[c.u], name: r[c.n], link: c.l > -1 ? r[c.l] : '', source: c.s > -1 ? r[c.s] : '', price: c.p > -1 ? Number(String(r[c.p]).replace(/[^0-9.]/g, '')) || 0 : 0, size: c.z > -1 ? r[c.z] : '', area: c.a > -1 ? r[c.a] : '', notes: c.o > -1 ? r[c.o] : '', file: f.getName() });",
+      "      }",
+      "    });",
+      "    var requests = [];",
+      "    if (cf.req) {",
+      "      var rv = SpreadsheetApp.open(cf.req).getSheets()[0].getDataRange().getDisplayValues();",
+      "      for (var j = 1; j < rv.length; j++) if (rv[j][0]) requests.push({ id: rv[j][0], requestedAt: rv[j][1], units: rv[j][2], note: rv[j][3], status: done[rv[j][0]] ? 'done' : 'pending' });",
+      "    }",
+      "    return { ok: true, version: VERSION, rows: rows, requests: requests.slice(-20) };",
+      "  } catch (err) {",
+      "    return { ok: false, version: VERSION, error: String(err) };",
+      "  }",
+      "}",
+      "",
+      "function addRequest(unitsJson, note) {",
+      "  try {",
+      "    var units = JSON.parse(unitsJson || '[]');",
+      "    var cf = compFiles(), ss;",
+      "    if (cf.req) ss = SpreadsheetApp.open(cf.req);",
+      "    else {",
+      "      ss = SpreadsheetApp.create('Check requests');",
+      "      DriveApp.getFileById(ss.getId()).moveTo(cf.folder);",
+      "      ss.getSheets()[0].appendRow(['Request ID', 'Requested at', 'Units and empty nights', 'Note']);",
+      "    }",
+      "    var id = Utilities.getUuid().slice(0, 8);",
+      "    var text = units.map(function (u) { return u.unit + ' | ' + u.area + ' | ' + u.type + ' | ' + u.guests + ' guests | empty nights: ' + u.emptyNights; }).join('\\n');",
+      "    ss.getSheets()[0].appendRow([id, new Date().toISOString(), text, note || '']);",
+      "    return { ok: true, version: VERSION, id: id };",
+      "  } catch (err) {",
+      "    return { ok: false, version: VERSION, error: String(err) };",
+      "  }",
+      "}",
+      "",
+      "// Archive cells: dates as yyyy-MM-dd, amounts as numbers. Emails, phone numbers and",
+      "// file links (payment proofs, IDs) are removed before anything leaves your account.",
+      "function cleanCell(v, tz) {",
+      "  if (v === null || v === undefined) return '';",
+      "  if (v instanceof Date) {",
+      "    if (v.getFullYear() < 1950) return Math.round((v.getTime() - Date.UTC(1899, 11, 30)) / 86400000);",
+      "    return Utilities.formatDate(v, tz, 'yyyy-MM-dd');",
+      "  }",
+      "  if (typeof v === 'boolean') return v;",
+      "  if (typeof v === 'number') return Math.abs(v) >= 1e8 ? '' : v;",
+      "  var s = String(v).trim();",
+      "  if (s.indexOf('@') > -1) return '';",
+      "  if (/^https?:\\/\\//.test(s)) { var m = s.match(/ref=([A-Za-z]+-[A-Za-z0-9]+)/); return m ? 'ref:' + m[1] : ''; }",
+      "  if (/^\\+?\\d[\\d\\s-]{8,}$/.test(s)) return '';",
+      "  return s;",
       "}",
       "",
       "function out(obj) {",
       "  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);",
       "}"
     ].join('\n');
+  }
+
+  // Parses one row of the BookingsArchive tab. The tab mixes several column orders from older
+  // versions of the booking site, so this reads by pattern instead of by header.
+  var ARCH_STATUS=/^(confirmed|pending|cancell?ed|declined|rejected|completed|paid|checked[ -]?in|done)$/i;
+  var ARCH_SOURCE=/^(airbnb|booking\.?com|bookingcom|booking com|agoda|facebook|fb|direct|walk-?in|instagram|tiktok|referral)$/i;
+  function parseArchiveRow(cells){
+    cells=(cells||[]).map(function(v){return v===null||v===undefined?'':v;});
+    var isDate=function(v){ return typeof v==='string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && v>='2020-01-01'; };
+    var isNum=function(v){ return typeof v==='number' || (typeof v==='string' && /^-?[\d,]+(\.\d+)?$/.test(v.trim()) && v.trim()!==''); };
+    var num=function(v){ return typeof v==='number'?v:Number(String(v).replace(/,/g,''))||0; };
+    var out={id:'',type:'booking',status:'',source:'',name:'',checkIn:'',checkOut:'',total:0,amountPaid:'',amountDue:'',paymentOption:'',guests:''};
+    // id + type + status + source
+    cells.forEach(function(v,i){
+      var s=typeof v==='string'?v.trim():'';
+      if(!out.id && /^[A-Z]{2,8}-[A-Z0-9]{4,}$/.test(s)) out.id=s;
+      if(!out.id && /^ref:/.test(s)) out.id=s.slice(4);
+      if(i<6 && /^(booking|block)$/i.test(s)) out.type=s.toLowerCase();
+      if(i<8 && !out.status && ARCH_STATUS.test(s)) out.status=s.toLowerCase();
+      if(i<8 && !out.source && ARCH_SOURCE.test(s)) out.source=s;
+    });
+    if(!out.type || cells.slice(0,40).some(function(v){return v==='block';})) out.type=cells.slice(0,6).some(function(v){return v==='block';})?'block':'booking';
+    // name: first plain text in the first 8 columns that isn't an id, type, status, source, number, date or flag
+    for(var i=1;i<8 && !out.name;i++){
+      var v=cells[i];
+      if(typeof v!=='string') continue;
+      var s=v.trim();
+      if(!s || /^ref:/.test(s) || /^(booking|block)$/i.test(s) || ARCH_STATUS.test(s) || ARCH_SOURCE.test(s) || isNum(s) || isDate(s) || /^(true|false)$/i.test(s) || /^[A-Z]{2,8}-[A-Z0-9]{4,}$/.test(s)) continue;
+      if(/^(sms|viber|whatsapp|call|messenger|email)$/i.test(s)) continue;
+      out.name=s;
+    }
+    // dates: first check-in/check-out pair (check-out after check-in, at most 60 nights)
+    var di=-1;
+    for(var j=0;j<cells.length-1;j++){
+      if(isDate(cells[j]) && isDate(cells[j+1]) && cells[j+1]>cells[j]){
+        var n=Math.round((new Date(cells[j+1]+'T00:00:00')-new Date(cells[j]+'T00:00:00'))/86400000);
+        if(n>0 && n<=60){ out.checkIn=cells[j]; out.checkOut=cells[j+1]; di=j+1; break; }
+      }
+    }
+    if(di<0) return out;
+    // guests: the small number just before the dates (within 6 cells), when present
+    for(var g=di-2;g>=Math.max(0,di-8);g--){ if(isNum(cells[g]) && num(cells[g])>=1 && num(cells[g])<=20){ out.guests=String(num(cells[g])); break; } }
+    // total: first amount of at least 500 after check-out, before the payment option
+    var pi=-1;
+    for(var k=di+1;k<cells.length;k++){
+      var s2=typeof cells[k]==='string'?cells[k].trim().toLowerCase():'';
+      if(s2==='deposit'||s2==='full'){ pi=k; out.paymentOption=s2; break; }
+      if(!out.total && isNum(cells[k]) && num(cells[k])>=500) out.total=num(cells[k]);
+    }
+    if(pi>-1){
+      var nums=[];
+      for(var m=pi+1;m<cells.length && nums.length<2;m++){
+        var c=cells[m];
+        if(isNum(c)) nums.push(num(c));
+        else if(c===''||isDate(c)) { if(isDate(c)) break; continue; }
+        else if(typeof c==='boolean') break;
+      }
+      if(nums.length) out.amountPaid=nums[0];
+      if(nums.length>1) out.amountDue=nums[1];
+    }
+    return out;
   }
 
   // ---- Google Sheet sync (Balai Haraya website bookings) ----
@@ -3142,7 +3289,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     if(s.id===undefined) s.id='1bS28JsTKxbJ8exM78g0DE0DCr1FuGQxmWjCnmndOicw';
     if(!s.tab) s.tab='Bookings';
     if(!s.propertyId){ var hp=props.find(function(p){return /haraya|balamban|erico/i.test(p.name+' '+(p.shortcut||''));}); s.propertyId=hp?hp.id:''; }
-    s.skipped=s.skipped||{}; s.rows=s.rows||[];
+    s.skipped=s.skipped||{}; s.rows=s.rows||[]; s.archiveRows=s.archiveRows||[];
     return s;
   }
   function sheetIdFrom(v){ v=String(v||'').trim(); var m=v.match(/\/d\/([a-zA-Z0-9_-]{20,})/); return m?m[1]:(/^[a-zA-Z0-9_-]{20,}$/.test(v)?v:''); }
@@ -3164,7 +3311,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   function sheetDiff(){
     var cfg=sheetCfg(), pid=cfg.propertyId, items=[];
     if(!pid) return items;
-    (cfg.rows||[]).forEach(function(r){
+    (cfg.rows||[]).concat(cfg.archiveRows||[]).forEach(function(r){
       var ref=String(r.id||'').trim(); if(!ref) return;
       if(cfg.skipped[ref]===sheetRowSig(r)) return;
       var ci=normSheetDate(r.checkIn), co=normSheetDate(r.checkOut);
@@ -3183,9 +3330,10 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       var bk=bookings.find(function(b){return b.sheetRef===ref;});
       var data={guest:(r.name||'Guest').trim(),phone:r.phone||'',channel:sheetChannel(r),checkIn:ci,checkOut:co,amount:sheetMoney(r.total),
         pax:r.guests||'',pets:r.pets||'',notes:r.notes||'',amountPaid:sheetMoney(r.amountPaid),amountDue:sheetMoney(r.amountDue),balanceDueDate:normSheetDate(r.balanceDueDate)};
+      if(r.archived && co<=today()){ data.amountPaid=data.amount; data.amountDue=0; } // past stay: balance was collected at check-in
       if(!active){ if(bk && cancelled) items.push({kind:'remove',ref:ref,r:r,bk:bk}); return; }
       if(!bk){
-        if(co<addDays(today(),-60)) return;
+        if(!r.archived && co<addDays(today(),-60)) return;
         var match=bookings.find(function(b){return b.propertyId===pid && !b.sheetRef && b.checkIn===ci && b.checkOut===co;});
         items.push(match?{kind:'link',ref:ref,r:r,bk:match,data:data}:{kind:'add',ref:ref,r:r,data:data});
         return;
@@ -3236,6 +3384,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     var r=it.r, ci=normSheetDate(r.checkIn), co=normSheetDate(r.checkOut);
     var when=weekdayShort(ci)+' '+ci.slice(5)+' → '+weekdayShort(co)+' '+co.slice(5);
     var who=(r.name||'Guest').trim();
+    if(it.kind==='add' && r.archived) return {t:'Past booking (archive): '+who,s:when+' \u00b7 '+fmt(it.data.amount)+(it.data.pax?' \u00b7 '+it.data.pax+' pax':'')};
     if(it.kind==='add') return {t:'New booking: '+who,s:when+' · '+fmt(it.data.amount)+' · '+(it.data.pax||'?')+' pax'+(it.data.amountDue?' · '+fmt(it.data.amountDue)+' balance due':'')};
     if(it.kind==='link') return {t:'Match: '+who,s:when+' · already in dashboard as “'+it.bk.guest+'” — will link and fill in details'};
     if(it.kind==='update') return {t:'Changed: '+who,s:it.changes.join(' · ')};
@@ -3254,6 +3403,14 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       if(!d.ok){ if(!d.version||d.version<SCRIPT_VERSION||/Only Airbnb/.test(d.error||'')) throw new Error('old-script'); throw new Error(d.error||'Unknown error'); }
       var cut=addDays(today(),-60);
       cfg.rows=(d.rows||[]).filter(function(r){ var co=normSheetDate(r.checkOut); return !co || co>=cut; });
+      var arch={}, activeIds={};
+      (d.rows||[]).forEach(function(r){ if(r.id) activeIds[String(r.id).trim()]=1; });
+      (d.archive||[]).forEach(function(cells){
+        var a=parseArchiveRow(cells);
+        if(!a.id||!a.checkIn||activeIds[a.id]) return;
+        arch[a.id]=a; // later rows are newer copies — last one wins
+      });
+      cfg.archiveRows=Object.keys(arch).map(function(k){ var a=arch[k]; return {id:a.id,type:a.type,status:a.status,source:a.source,name:a.name,checkIn:a.checkIn,checkOut:a.checkOut,total:a.total,amountPaid:a.amountPaid,amountDue:a.amountDue,guests:a.guests,archived:true}; });
       cfg.lastFetch=new Date().toISOString(); sheetMsg='';
       if(cfg.autoApply){
         var auto=sheetDiff().filter(function(it){return it.kind!=='remove';});
@@ -3285,7 +3442,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     var auto=el('input',{type:'checkbox'}); auto.checked=!!cfg.autoApply;
     auto.addEventListener('change',function(){ cfg.autoApply=auto.checked; saveCalSync().then(render); });
     box.appendChild(el('label',{style:'display:flex;gap:8px;align-items:center;font-size:12px;margin-top:10px'},[auto,'Apply new bookings, changes and blocks automatically (cancellations always wait for you)']));
-    box.appendChild(el('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:6px'},[cfg.lastFetch?('Last read '+new Date(cfg.lastFetch).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' · '+cfg.rows.length+' rows'):'Not read yet']));
+    box.appendChild(el('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:6px'},[cfg.lastFetch?('Last read '+new Date(cfg.lastFetch).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' \u00b7 '+cfg.rows.length+' current + '+(cfg.archiveRows||[]).length+' archived bookings'):'Not read yet']));
 
     var items=sheetDiff();
     if(items.length){
@@ -3294,7 +3451,8 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
         el('div',{style:'font-weight:600;font-size:13px;color:var(--amber)'},['From the sheet — waiting for you ('+items.length+')']),
         el('button',{class:'small',type:'button',onclick:function(){ applySheetItems(items).then(render); }},['Apply all'])
       ]));
-      items.forEach(function(it){
+      var shownItems=items.length>12?items.slice(0,10):items;
+      shownItems.forEach(function(it){
         var dsc=describeSheetItem(it);
         list.appendChild(el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-top:1px solid rgba(0,0,0,.06)'},[
           el('div',{style:'font-size:13px;min-width:0'},[el('div',{style:'font-weight:500'},[dsc.t]),el('div',{style:'font-size:12px;color:var(--ink-soft)'},[dsc.s])]),
@@ -3304,6 +3462,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
           ])
         ]));
       });
+      if(items.length>shownItems.length) list.appendChild(el('div',{style:'font-size:12px;color:var(--ink-soft);padding-top:8px;border-top:1px solid rgba(0,0,0,.06)'},['+ '+(items.length-shownItems.length)+' more (included in Apply all)']));
       box.appendChild(list);
     }else if(cfg.lastFetch){
       box.appendChild(el('div',{style:'font-size:12px;color:var(--green);margin-top:12px'},['Dashboard matches the sheet ✓']));
@@ -3648,6 +3807,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     var s=pSettings(pid);
     if(s.base) return {value:s.base,source:'your base'};
     var c=compAvg(pid); if(c.avg) return {value:c.avg,source:'comp average'};
+    var mk=marketStats(pid); if(mk.count>=3) return {value:mk.mid,source:'market middle (Claude)'};
     var h=histStats(pid,90); if(h.adr) return {value:h.adr,source:'your 90-day average'};
     return {value:0,source:''};
   }
@@ -3980,6 +4140,117 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     return Object.keys(by).map(function(k){return by[k];}).sort(function(a,b){return (a.last.name||'').localeCompare(b.last.name||'');});
   }
 
+  // ---- Market check by Claude: results Claude saves to your Drive folder each week / on request ----
+  var marketMsg='', marketBusy=false;
+  function marketCfg(){ calSync.market=calSync.market||{rows:[],requests:[],lastFetch:''}; return calSync.market; }
+  function marketRowsFor(pid){
+    var m=marketCfg(); if(!m.rows.length) return [];
+    // newest results file per unit only
+    var mine=m.rows.filter(function(r){ return findPropertyId(r.unit)===pid; });
+    if(!mine.length) return [];
+    var latest=mine.reduce(function(a,r){ return (r.checkedOn||'')>a?(r.checkedOn||''):a; },'');
+    return mine.filter(function(r){return r.checkedOn===latest;});
+  }
+  function marketStats(pid){
+    var rows=marketRowsFor(pid), prices=rows.map(function(r){return Number(r.price)||0;}).filter(Boolean).sort(function(a,b){return a-b;});
+    if(!prices.length) return {count:0,rows:rows};
+    var mid=prices.length%2?prices[(prices.length-1)/2]:(prices[prices.length/2-1]+prices[prices.length/2])/2;
+    return {count:prices.length,min:prices[0],max:prices[prices.length-1],mid:mid,avg:prices.reduce(function(s,v){return s+v;},0)/prices.length,rows:rows,checkedOn:rows[0]&&rows[0].checkedOn};
+  }
+  function syncMarket(silent){
+    if(!calSync.proxyUrl||marketBusy) return Promise.resolve();
+    marketBusy=true;
+    var q=calSync.proxyUrl+(calSync.proxyUrl.indexOf('?')>-1?'&':'?')+'key='+encodeURIComponent(calSync.proxyKey)+'&comps=1';
+    return fetch(q,{redirect:'follow'}).then(function(r){return r.text();}).then(function(txt){
+      var d; try{ d=JSON.parse(txt); }catch(e){ throw new Error('no-json'); }
+      if(!d.ok){ if(!d.version||d.version<SCRIPT_VERSION||/Only Airbnb/.test(d.error||'')) throw new Error('old-script'); throw new Error(d.error||'Unknown error'); }
+      var m=marketCfg(); m.rows=d.rows||[]; m.requests=d.requests||[]; m.lastFetch=new Date().toISOString(); marketMsg='';
+      return saveCalSync();
+    }).catch(function(err){
+      marketMsg=(err.message==='old-script'||err.message==='no-json')?'Update your Google script to version '+SCRIPT_VERSION+' (Calendar sync tab) to see Claude’s market checks here.':('Couldn’t load market checks: '+err.message);
+    }).then(function(){ marketBusy=false; if(!silent) render(); });
+  }
+  function openNights(pid,days){
+    var out=[]; for(var i=0;i<days;i++){ var d=addDays(today(),i); if(!bookedOn(pid,d)) out.push(d); } return out;
+  }
+  function requestMarketCheck(pids,note){
+    if(!calSync.proxyUrl){ alert('Finish the Google script setup in the Calendar sync tab first.'); return Promise.resolve(); }
+    var units=pids.map(function(pid){ var sp=compSpecs(pid); return {unit:propShort(pid),area:sp.area,type:sp.bedrooms?sp.bedrooms+' bedroom':'studio',guests:sp.guests,emptyNights:openNights(pid,30).slice(0,30).join(' ')}; });
+    var q=calSync.proxyUrl+(calSync.proxyUrl.indexOf('?')>-1?'&':'?')+'key='+encodeURIComponent(calSync.proxyKey)+'&request=1&units='+encodeURIComponent(JSON.stringify(units))+'&note='+encodeURIComponent(note||'');
+    return fetch(q,{redirect:'follow'}).then(function(r){return r.text();}).then(function(txt){
+      var d=JSON.parse(txt); if(!d.ok) throw new Error(d.error||'failed');
+      marketMsg='Request sent — Claude picks it up on the next run (morning or evening) and the prices appear here automatically.';
+      return syncMarket(true);
+    }).catch(function(e){ marketMsg='Couldn’t send the request: '+(e.message==='Unexpected token'?'update your Google script':e.message); }).then(function(){ render(); });
+  }
+
+  function renderMarketCard(panel,pid){
+    var m=marketCfg(), st=marketStats(pid), s=pSettings(pid);
+    var card=pCard([], 'border-color:var(--accent)');
+    card.appendChild(el('div',{style:'display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start;margin-bottom:6px'},[
+      el('div',{},[
+        el('div',{style:'font-weight:600;font-size:14px'},['Market check by Claude']),
+        el('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:2px'},[st.count?('Nearby listings found '+st.checkedOn+' · '+st.count+' with prices'):'No market check for this unit yet'])
+      ]),
+      el('div',{style:'display:flex;gap:6px;flex-wrap:wrap'},[
+        el('button',{class:'small ghost',type:'button',onclick:function(){ syncMarket(false); }},[marketBusy?'Loading…':'Refresh']),
+        el('button',{class:'small',type:'button',onclick:function(){ requestMarketCheck([pid],'empty nights'); }},['Request a check for '+propShort(pid)])
+      ])
+    ]));
+    if(marketMsg) card.appendChild(el('div',{style:'font-size:12px;color:var(--accent);margin-bottom:8px'},[marketMsg]));
+    var pending=(m.requests||[]).filter(function(r){return r.status==='pending' && (r.units||'').indexOf(propShort(pid))>-1;});
+    if(pending.length) card.appendChild(el('div',{style:'font-size:12px;color:var(--amber);margin-bottom:8px'},['⏳ Check requested '+pending[0].requestedAt.slice(0,16).replace('T',' ')+' — waiting for Claude’s next run']));
+    if(st.count){
+      var mine=finalPrice(pid,nextDow(2)).price;
+      card.appendChild(el('div',{class:'metrics',style:'padding:4px 0 10px;border-bottom:none'},[
+        el('div',{class:'metric'},[el('div',{class:'lbl'},['Market low – high']),el('div',{class:'val mono',style:'font-size:15px'},[fmt(st.min)+'–'+fmt(st.max).replace('₱','')])]),
+        el('div',{class:'metric'},[el('div',{class:'lbl'},['Market middle']),el('div',{class:'val mono'},[fmt(st.mid)])]),
+        el('div',{class:'metric'},[el('div',{class:'lbl'},['Your base']),el('div',{class:'val mono'},[s.base?fmt(s.base):'not set'])]),
+        el('div',{class:'metric'},[el('div',{class:'lbl'},['Your next weekday']),el('div',{class:'val mono'},[mine?fmt(mine):'—'])])
+      ]));
+      card.appendChild(el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px'},[
+        el('button',{class:'small',type:'button',onclick:function(){
+          var v=Math.round(st.mid/50)*50; if(!confirm('Set '+propShort(pid)+' base price to the market middle, '+fmt(v)+'? Weekend, event and empty-night rules still apply on top.')) return;
+          pushUndoSnapshot(); setSetting(pid,'base',v); render();
+        }},['Use market middle as my base']),
+        el('button',{class:'small ghost',type:'button',onclick:function(){
+          var v=Math.round(st.min/50)*50; if(!confirm('Set '+propShort(pid)+' minimum price to the market low, '+fmt(v)+'?')) return;
+          pushUndoSnapshot(); setSetting(pid,'min',v); render();
+        }},['Use market low as my minimum'])
+      ]));
+      var list=el('div',{});
+      st.rows.slice().sort(function(a,b){return (Number(a.price)||1e9)-(Number(b.price)||1e9);}).forEach(function(r){
+        var nm=r.link?el('a',{href:r.link,target:'_blank',rel:'noopener'},[r.name]):el('span',{},[r.name]);
+        list.appendChild(el('div',{style:'display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line-soft);font-size:13px'},[
+          el('div',{style:'min-width:0'},[nm,el('div',{style:'font-size:11px;color:var(--ink-soft)'},[[r.size,r.area,r.source].filter(Boolean).join(' · ')+(r.notes?' — '+r.notes:'')])]),
+          el('div',{class:'mono',style:'flex-shrink:0;'+(Number(r.price)?'':'color:var(--ink-soft);font-size:11px')},[Number(r.price)?fmt(Number(r.price)):'price not public'])
+        ]));
+      });
+      card.appendChild(list);
+    }else if(!m.lastFetch){
+      card.appendChild(el('div',{style:'font-size:12px;color:var(--ink-soft)'},['Tap Refresh to load Claude’s checks (needs the version '+SCRIPT_VERSION+' Google script).']));
+    }
+    card.appendChild(el('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:10px;line-height:1.5'},['Claude searches public listing and price-comparison pages for units near yours with the same size and guest count, every Monday morning plus whenever you request a check. Prices are usually “starting from” prices, not the exact price for one night — use them to set your base, and the manual check below for important dates. Which units Claude checks is set in the “Units to compare” sheet in your Drive folder “Dashboard – Competitor Prices”.']));
+    panel.appendChild(card);
+  }
+
+  function renderBulkPaste(card,pid){
+    var ta=el('textarea',{placeholder:'Paste several links at once, one per line — you can add the price after the link, e.g.\nhttps://www.airbnb.com/rooms/123 2100',style:'width:100%;min-height:90px;font-family:inherit;font-size:14px;padding:10px;border:1px solid var(--line);border-radius:var(--radius-sm);margin:6px 0'});
+    card.appendChild(ta);
+    card.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
+      var lines=ta.value.split(/\n+/).map(function(l){return l.trim();}).filter(Boolean);
+      if(!lines.length) return;
+      var slots=compQuickRows.filter(function(r){return !r.link && !r.name;});
+      lines.forEach(function(l){
+        var m=l.match(/(https?:\/\/\S+)/); if(!m) return;
+        var link=m[1], rest=l.replace(link,'').replace(/,/g,'').replace(/[^\d.]/g,' ').trim().split(/\s+/).filter(Boolean);
+        var row=slots.shift(); if(!row){ row={link:'',name:'',price:'',channel:''}; compQuickRows.push(row); }
+        var info=compFromLink(link); row.link=link; row.channel=info.channel; row.name=row.name||info.name; if(rest.length) row.price=rest[rest.length-1];
+      });
+      render();
+    }},['Fill rows from pasted links']));
+  }
+
   function renderPricingComps(panel){
     if(!pricingCompProp || !props.some(function(p){return p.id===pricingCompProp;})) pricingCompProp=pricingProp;
     var pid=pricingCompProp, sp=compSpecs(pid), s=pSettings(pid);
@@ -3995,9 +4266,11 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     });
     panel.appendChild(qd);
 
+    renderMarketCard(panel,pid);
+
     // 1. Specs + search buttons
     var specCard=pCard([]);
-    specCard.appendChild(el('div',{style:'font-weight:600;font-size:14px;margin-bottom:4px'},['1 · Find comparable listings']));
+    specCard.appendChild(el('div',{style:'font-weight:600;font-size:14px;margin-bottom:4px'},['Manual check · 1 · Find comparable listings']));
     specCard.appendChild(el('div',{style:'font-size:12px;color:var(--ink-soft);line-height:1.5;margin-bottom:10px'},['Set this unit’s specs once. The buttons open Airbnb and Booking.com already filtered to the same area, size, guest count and night — then pick 10 listings that really compete with yours (same building or walking distance, similar size and finish).']));
     var g=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap'});
     var areaI=el('input',{type:'text',placeholder:'e.g. Baseline Residences, Cebu City'}); areaI.value=sp.area;
@@ -4034,6 +4307,8 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       rowsWrap.appendChild(el('div',{style:'display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1.5fr) 96px;gap:6px;align-items:center;margin-bottom:6px'},[linkI,nameI,priceI]));
       rowsWrap.appendChild(el('div',{style:'margin:-4px 0 6px 2px'},[chTag]));
     });
+    addCard.appendChild(el('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:4px'},['Tip: on iPad, open Safari next to this app in Split View (drag Safari from the Dock to the side) so you never leave the dashboard.']));
+    renderBulkPaste(addCard,pid);
     addCard.appendChild(rowsWrap);
     addCard.appendChild(el('button',{type:'button',onclick:function(){
       var good=compQuickRows.filter(function(r){return Number(r.price)>0 && (r.name||r.link);});
