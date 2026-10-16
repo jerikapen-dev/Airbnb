@@ -31,6 +31,7 @@ body{background:var(--paper)}
 #app{font-family:'Inter',sans-serif;background:var(--paper);color:var(--ink);min-height:100vh;max-width:1040px;margin:0 auto}
 .mono{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
 .disp{font-family:'Fraunces',serif}
+#app a{color:var(--accent);text-decoration-color:var(--line);text-underline-offset:3px}
 
 .topbar{padding:32px 28px 20px;display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
 .brand{display:flex;flex-direction:column}
@@ -276,7 +277,8 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       properties:props, bookings:bookings, expenses:expenses, cleaners:cleaners,
       cleaningOverrides:cleaningOverrides, cleaningPayOverrides:cleaningPayOverrides,
       cleaningFeeOverrides:cleaningFeeOverrides, cleaningDone:cleaningDone,
-      dismissedConflicts:dismissedConflicts, maintenanceIntervals:maintenanceIntervals
+      dismissedConflicts:dismissedConflicts, maintenanceIntervals:maintenanceIntervals,
+      pricing:pricing, calSync:calSync
     };
     fsDb.collection('dashboards').doc(fsUid).collection('backups').doc(periodKey).set(backupDoc).then(function(){
       try{ localStorage.setItem(lastKey,periodKey); }catch(e){}
@@ -323,7 +325,8 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       properties:props, bookings:bookings, expenses:expenses, cleaners:cleaners,
       cleaningOverrides:cleaningOverrides, cleaningPayOverrides:cleaningPayOverrides,
       cleaningFeeOverrides:cleaningFeeOverrides, cleaningDone:cleaningDone,
-      dismissedConflicts:dismissedConflicts, maintenanceIntervals:maintenanceIntervals
+      dismissedConflicts:dismissedConflicts, maintenanceIntervals:maintenanceIntervals,
+      pricing:pricing
     });
   }
   function pushUndoSnapshot(){
@@ -337,7 +340,9 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     cleaningOverrides=s.cleaningOverrides; cleaningPayOverrides=s.cleaningPayOverrides;
     cleaningFeeOverrides=s.cleaningFeeOverrides; cleaningDone=s.cleaningDone;
     dismissedConflicts=s.dismissedConflicts; maintenanceIntervals=s.maintenanceIntervals;
+    if(s.pricing) pricing=normalizePricing(s.pricing);
     return Promise.all([
+      save('pricing',pricing),
       save('properties',props), save('bookings',bookings), save('expenses',expenses), save('cleaners',cleaners),
       save('cleaningOverrides',cleaningOverrides), save('cleaningPayOverrides',cleaningPayOverrides),
       save('cleaningFeeOverrides',cleaningFeeOverrides), save('cleaningDone',cleaningDone),
@@ -404,9 +409,12 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     try{var r9=await storage.get('cleaningFeeOverrides');cleaningFeeOverrides=r9?JSON.parse(r9.value):{};}catch(e){cleaningFeeOverrides={};}
     try{var r8=await storage.get('cleaningDone');cleaningDone=r8?JSON.parse(r8.value):{};}catch(e){cleaningDone={};}
     try{var r7=await storage.get('maintenanceIntervals');maintenanceIntervals=r7?JSON.parse(r7.value):{aircon:4,grease:1,rpt:12,utilities:1};}catch(e){maintenanceIntervals={aircon:4,grease:1,rpt:12,utilities:1};}
+    try{var r12=await storage.get('pricing');pricing=normalizePricing(r12?JSON.parse(r12.value):null);}catch(e){pricing=normalizePricing(null);}
+    try{var r13=await storage.get('calSync');calSync=normalizeCalSync(r13?JSON.parse(r13.value):null);}catch(e){calSync=normalizeCalSync(null);}
     try{var r11=await storage.get('ownerAccounts');ownerAccounts=r11?JSON.parse(r11.value):{};}catch(e){ownerAccounts={};}
     loaded=true; render();
     if(fsReady) maybeAutoBackup();
+    maybeAutoSyncCalendars();
   }
   async function save(key,val){
     try{await storage.set(key,JSON.stringify(val));}catch(e){console.error('save failed',key,e);}
@@ -522,6 +530,11 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       var status='ok', reason='';
       if(!checkIn||!checkOut){ status='invalid'; reason='Missing check-in/check-out'; }
       else if(!propertyId){ status='invalid'; reason='No matching property (add \u201c'+(propRaw||'\u2014')+'\u201d as a property or shortcut first)'; }
+      else if(bookings.some(function(b){return b.source==='ical' && b.propertyId===propertyId && b.checkIn===checkIn && b.checkOut===checkOut;})){
+        var ph=bookings.find(function(b){return b.source==='ical' && b.propertyId===propertyId && b.checkIn===checkIn && b.checkOut===checkOut;});
+        reason='Fills in the calendar-sync placeholder for these dates (no duplicate is created)';
+        var replaceId=ph.id;
+      }
       else{
         var sig=bookingSignature(guest,checkIn,checkOut,amount);
         var gdKey=(guest||'').trim().toLowerCase()+'|'+checkIn+'|'+checkOut;
@@ -537,8 +550,9 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
         propRaw:propRaw, missingProperty:(!propertyId && !!checkIn && !!checkOut),
         guest:guest||'Guest', phone:phone, email:email, channel:channel,
         checkIn:checkIn, checkOut:checkOut, amount:amount,
-        status:status, reason:reason, selected:(status==='ok')
+        status:status, reason:reason, selected:(status==='ok'), replaceId:replaceId||null
       });
+      replaceId=null;
     });
     return candidates;
   }
@@ -548,6 +562,10 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     if(toAdd.length===0) return 0;
     pushUndoSnapshot();
     toAdd.forEach(function(c){
+      if(c.replaceId){
+        var ph=bookings.find(function(b){return b.id===c.replaceId;});
+        if(ph){ ph.guest=c.guest; ph.phone=c.phone||ph.phone; ph.email=c.email; ph.channel=c.channel||ph.channel; ph.amount=c.amount; delete ph.source; return; }
+      }
       bookings.push({id:uid(),propertyId:c.propertyId,guest:c.guest,phone:c.phone,email:c.email,channel:c.channel,checkIn:c.checkIn,checkOut:c.checkOut,amount:c.amount,checkedIn:false,checkedOut:false});
     });
     save('bookings',bookings);
@@ -737,6 +755,10 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     var items=[];
     var t=today();
 
+    if(calSync.lastSync){ var calPend=calItemsNeedingBooking().length; if(calPend>0) items.push({type:'calendar', tone:'amber', text:calPend+' reservation'+(calPend===1?'':'s')+' on your Airbnb/Booking.com calendars not yet in Bookings (Calendar sync tab)'}); }
+    var pendTotal=0; props.forEach(function(p){ pendTotal+=pendingUpdates(p.id,14); });
+    if(pendTotal>0) items.push({type:'pricing', tone:'amber', text:pendTotal+' price change'+(pendTotal===1?'':'s')+' in the next 14 days not yet updated on Airbnb / Booking.com (Pricing tab)'});
+
     upcomingVacancies(14).forEach(function(p){
       items.push({type:'vacancy', tone:'amber', text:propShort(p.id)+' has no bookings in the next 14 days'});
     });
@@ -856,7 +878,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   }
 
   function renderTabs(root){
-    var tabs=[['overview','Overview'],['properties','Properties'],['bookings','Bookings'],['expenses','Expenses'],['owner','Owner report'],['earnings','My earnings'],['cleaning','Cleaning schedule'],['maintenance','Maintenance'],['backup','Backup']];
+    var tabs=[['overview','Overview'],['properties','Properties'],['bookings','Bookings'],['pricing','Pricing'],['calsync','Calendar sync'],['expenses','Expenses'],['owner','Owner report'],['earnings','My earnings'],['cleaning','Cleaning schedule'],['maintenance','Maintenance'],['backup','Backup']];
     var bar=el('div',{class:'tabs'});
     tabs.forEach(function(tb){
       bar.appendChild(el('div',{class:'tab'+(activeTab===tb[0]?' active':''),onclick:function(){activeTab=tb[0];render();}},[tb[1]]));
@@ -2750,7 +2772,10 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
             cleaningOverrides=data.cleaningOverrides||{}; cleaningPayOverrides=data.cleaningPayOverrides||{};
             cleaningFeeOverrides=data.cleaningFeeOverrides||{}; cleaningDone=data.cleaningDone||{};
             dismissedConflicts=data.dismissedConflicts||{}; maintenanceIntervals=data.maintenanceIntervals||{aircon:4,grease:1,rpt:12,utilities:1};
+            if(data.pricing) pricing=normalizePricing(data.pricing);
+            if(data.calSync) calSync=normalizeCalSync(data.calSync);
             Promise.all([
+              save('pricing',pricing), save('calSync',calSync),
               save('properties',props), save('bookings',bookings), save('expenses',expenses),
               save('cleaners',cleaners), save('cleaningOverrides',cleaningOverrides),
               save('cleaningPayOverrides',cleaningPayOverrides), save('cleaningFeeOverrides',cleaningFeeOverrides),
@@ -2818,7 +2843,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
         version:1, exportedAt:new Date().toISOString(),
         properties:props, bookings:bookings, expenses:expenses,
         cleaners:cleaners, cleaningOverrides:cleaningOverrides, cleaningPayOverrides:cleaningPayOverrides, cleaningFeeOverrides:cleaningFeeOverrides, cleaningDone:cleaningDone, dismissedConflicts:dismissedConflicts,
-        maintenanceIntervals:maintenanceIntervals
+        maintenanceIntervals:maintenanceIntervals, pricing:pricing, calSync:calSync
       };
       var blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
       triggerDownload(blob,'dashboard-backup-'+today()+'.json');
@@ -2847,7 +2872,10 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
           dismissedConflicts = data.dismissedConflicts||{};
           cleaningDone = data.cleaningDone||{};
           maintenanceIntervals = data.maintenanceIntervals||{aircon:4,grease:1,rpt:12,utilities:1};
+          if(data.pricing) pricing=normalizePricing(data.pricing);
+          if(data.calSync) calSync=normalizeCalSync(data.calSync);
           Promise.all([
+            save('pricing',pricing), save('calSync',calSync),
             save('properties',props), save('bookings',bookings), save('expenses',expenses),
             save('cleaners',cleaners), save('cleaningOverrides',cleaningOverrides),
             save('cleaningPayOverrides',cleaningPayOverrides), save('cleaningFeeOverrides',cleaningFeeOverrides), save('cleaningDone',cleaningDone), save('dismissedConflicts',dismissedConflicts), save('maintenanceIntervals',maintenanceIntervals)
@@ -2866,7 +2894,988 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     panel.appendChild(restoreCard);
   }
 
+  // ================= CALENDAR SYNC (iCal from Airbnb / Booking.com via your Google Apps Script) =================
+  var calSync={proxyUrl:'',proxyKey:'',feeds:{},events:{},lastSync:'',lastErrors:{},dismissed:{}};
+  var calSyncBusy=false, calSyncMsg='', calAutoTried=false;
+  var FEEDS=[['airbnb','Airbnb'],['booking','Booking.com']];
+
+  function normalizeCalSync(c){
+    c=c||{};
+    return {proxyUrl:c.proxyUrl||'',proxyKey:c.proxyKey||'',feeds:c.feeds||{},events:c.events||{},lastSync:c.lastSync||'',lastErrors:c.lastErrors||{},dismissed:c.dismissed||{},blocks:c.blocks||[],feedToken:c.feedToken||'',includeChannelBookings:c.includeChannelBookings||{},lastPublish:c.lastPublish||''};
+  }
+  function saveCalSync(){ return save('calSync',calSync); }
+  function randomKey(){ var a='abcdefghjkmnpqrstuvwxyz23456789',k=''; for(var i=0;i<20;i++) k+=a[Math.floor(Math.random()*a.length)]; return k; }
+
+  function icsDate(v){ var m=String(v).match(/(\d{4})(\d{2})(\d{2})/); return m?m[1]+'-'+m[2]+'-'+m[3]:''; }
+  function icsText(v){ return String(v).replace(/\\n/gi,'\n').replace(/\\,/g,',').replace(/\\;/g,';').replace(/\\\\/g,'\\'); }
+  function parseICS(text){
+    var lines=String(text).replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/\n[ \t]/g,'').split('\n');
+    var evs=[], cur=null;
+    lines.forEach(function(l){
+      if(l==='BEGIN:VEVENT'){ cur={}; return; }
+      if(l==='END:VEVENT'){
+        if(cur&&cur.start){ if(!cur.end||cur.end<=cur.start) cur.end=addDays(cur.start,1); evs.push(cur); }
+        cur=null; return;
+      }
+      if(!cur) return;
+      var i=l.indexOf(':'); if(i<0) return;
+      var name=l.slice(0,i).split(';')[0].toUpperCase(), val=l.slice(i+1);
+      if(name==='DTSTART') cur.start=icsDate(val);
+      else if(name==='DTEND') cur.end=icsDate(val);
+      else if(name==='SUMMARY') cur.summary=icsText(val).trim();
+      else if(name==='UID') cur.uid=val.trim();
+      else if(name==='DESCRIPTION') cur.description=icsText(val);
+    });
+    return evs;
+  }
+  function classifyEvent(feed,ev){
+    var s=(ev.summary||'').toLowerCase(), d=ev.description||'';
+    var code=(d.match(/reservations\/details\/([A-Z0-9]+)/i)||[])[1]||'';
+    var phone4=(d.match(/Last 4 Digits\)?:\s*(\d{4})/i)||[])[1]||'';
+    var kind=(code || /reserved|reservation|booked/.test(s)) ? 'reserved' : 'unavailable';
+    return {uid:ev.uid||(feed+ev.start+ev.end),feed:feed,start:ev.start,end:ev.end,summary:ev.summary||'',kind:kind,code:code,phone4:phone4};
+  }
+  function feedLabel(f){ return f==='airbnb'?'Airbnb':'Booking.com'; }
+  function calEventLabel(ev){
+    if(ev.kind==='reserved') return 'Reserved on '+feedLabel(ev.feed)+(ev.code?' ('+ev.code+')':'');
+    return 'Unavailable on '+feedLabel(ev.feed);
+  }
+
+  function fetchFeed(url){
+    var q=calSync.proxyUrl+(calSync.proxyUrl.indexOf('?')>-1?'&':'?')+'key='+encodeURIComponent(calSync.proxyKey)+'&url='+encodeURIComponent(url);
+    return fetch(q,{redirect:'follow'}).then(function(r){ return r.text(); }).then(function(txt){
+      var data; try{ data=JSON.parse(txt); }catch(e){ throw new Error('Your Google script did not answer properly — check it is deployed as a Web app with access “Anyone”.'); }
+      if(!data.ok) throw new Error(data.error||'Unknown error');
+      if(String(data.ics).indexOf('BEGIN:VCALENDAR')===-1) throw new Error('That link did not return a calendar — copy the export link again.');
+      return data.ics;
+    },function(err){
+      if(err && err.message && err.message.indexOf('Google script')>-1) throw err;
+      throw new Error('Could not reach your Google script — check the Web app URL (it ends in /exec) and that access is “Anyone”.');
+    });
+  }
+  function syncAllCalendars(silent){
+    if(calSyncBusy) return Promise.resolve();
+    if(!calSync.proxyUrl){ if(!silent){ calSyncMsg='Set up the Google script link first.'; render(); } return Promise.resolve(); }
+    var jobs=[];
+    props.forEach(function(p){
+      var f=calSync.feeds[p.id]||{};
+      FEEDS.forEach(function(fd){ if(f[fd[0]] && /^https?:\/\//.test(f[fd[0]])) jobs.push({pid:p.id,feed:fd[0],url:f[fd[0]].trim()}); });
+    });
+    if(!jobs.length){ if(!silent){ calSyncMsg='Add at least one calendar link to a property below.'; render(); } return Promise.resolve(); }
+    calSyncBusy=true; calSyncMsg='Syncing '+jobs.length+' calendar'+(jobs.length>1?'s':'')+'…'; if(!silent) render();
+    var results={}, errors={}, from=addDays(today(),-30), to=addDays(today(),400), i=0;
+    function next(){
+      if(i>=jobs.length) return Promise.resolve();
+      var j=jobs[i++];
+      return fetchFeed(j.url).then(function(ics){
+        var evs=parseICS(ics).filter(function(e){return e.end>=from && e.start<=to;}).map(function(e){return classifyEvent(j.feed,e);});
+        results[j.pid]=(results[j.pid]||[]).filter(function(e){return e.feed!==j.feed;}).concat(evs);
+      },function(err){
+        errors[j.pid+'|'+j.feed]=err.message;
+        // keep the last good copy of this feed if the fetch failed
+        var old=(calSync.events[j.pid]||[]).filter(function(e){return e.feed===j.feed;});
+        results[j.pid]=(results[j.pid]||[]).concat(old);
+      }).then(next);
+    }
+    return Promise.all([next(),next(),next(),next()]).then(function(){
+      calSync.events=results; calSync.lastErrors=errors; calSync.lastSync=new Date().toISOString();
+      calSyncBusy=false;
+      var nErr=Object.keys(errors).length;
+      calSyncMsg=nErr?('Synced with '+nErr+' problem'+(nErr>1?'s':'')+' — see below.'):'Synced just now.';
+      return saveCalSync();
+    }).then(function(){ render(); return publishFeeds(); });
+  }
+  function maybeAutoSyncCalendars(){
+    if(calAutoTried || !calSync.proxyUrl) return;
+    calAutoTried=true;
+    var last=calSync.lastSync?new Date(calSync.lastSync).getTime():0;
+    if(Date.now()-last>2*3600*1000) syncAllCalendars(true);
+  }
+
+  function overlaps(a1,a2,b1,b2){ return a1<b2 && b1<a2; }
+  function calItemsNeedingBooking(){
+    var t=today(), horizon=addDays(t,120), out=[];
+    Object.keys(calSync.events).forEach(function(pid){
+      if(!props.some(function(p){return p.id===pid;})) return;
+      var evs=calSync.events[pid]||[];
+      evs.forEach(function(ev){
+        if(ev.end<=t || ev.start>horizon || calSync.dismissed[ev.uid]) return;
+        // Airbnb "Not available" blocks are usually manual blocks or mirrors of other channels — not listed
+        if(ev.feed==='airbnb' && ev.kind!=='reserved') return;
+        // your own dashboard blocks come back from the channels as “unavailable” — skip them
+        if((calSync.blocks||[]).some(function(bl){return bl.propertyId===pid && overlaps(bl.start,bl.end,ev.start,ev.end);})) return;
+        var inDash=bookings.some(function(b){return b.propertyId===pid && overlaps(b.checkIn,b.checkOut,ev.start,ev.end);});
+        if(inDash) return;
+        // a Booking.com "unavailable" range that sits on an Airbnb reservation is just the mirror of it
+        if(ev.feed==='booking' && evs.some(function(o){return o.feed==='airbnb' && o.kind==='reserved' && overlaps(o.start,o.end,ev.start,ev.end);})) return;
+        out.push({pid:pid,ev:ev});
+      });
+    });
+    return out.sort(function(a,b){return a.ev.start.localeCompare(b.ev.start);});
+  }
+  function addBookingFromCal(pid,ev){
+    var guest=ev.feed==='airbnb'?('Airbnb guest'+(ev.code?' '+ev.code:'')):'Booking.com guest';
+    bookings.push({id:uid(),propertyId:pid,guest:guest,phone:ev.phone4?('…'+ev.phone4):'',email:'',channel:feedLabel(ev.feed),checkIn:ev.start,checkOut:ev.end,amount:0,checkedIn:false,checkedOut:false,source:'ical',icalUid:ev.uid});
+  }
+
+  var SCRIPT_VERSION=2;
+  function scriptCode(){
+    return [
+      "// Calendar relay for your property dashboard (version "+SCRIPT_VERSION+").",
+      "// 1) Fetches Airbnb / Booking.com / Agoda calendar links for the dashboard (only with your key).",
+      "// 2) Serves a calendar link per property with the dates you block in the dashboard,",
+      "//    so Airbnb and Booking.com can import it and block those dates too.",
+      "var KEY = '"+calSync.proxyKey+"';",
+      "var VERSION = "+SCRIPT_VERSION+";",
+      "var ALLOWED = [/^https:\\/\\/([a-z0-9-]+\\.)*airbnb\\.[a-z.]+\\//i, /^https:\\/\\/([a-z0-9-]+\\.)*booking\\.com\\//i, /^https:\\/\\/([a-z0-9-]+\\.)*agoda\\.com\\//i];",
+      "",
+      "function doGet(e) {",
+      "  var p = (e && e.parameter) || {};",
+      "  if (p.feed) return serveFeed(p.feed, p.t);",
+      "  if (p.key !== KEY) return out({ ok: false, error: 'Wrong key — paste the latest code from the dashboard.' });",
+      "  if (p.ping) return out({ ok: true, version: VERSION });",
+      "  var url = p.url || '';",
+      "  if (!ALLOWED.some(function (r) { return r.test(url); })) return out({ ok: false, error: 'Only Airbnb, Booking.com or Agoda calendar links are allowed.' });",
+      "  try {",
+      "    var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });",
+      "    var code = res.getResponseCode();",
+      "    if (code !== 200) return out({ ok: false, error: 'The calendar link returned error ' + code + '.' });",
+      "    return out({ ok: true, ics: res.getContentText() });",
+      "  } catch (err) {",
+      "    return out({ ok: false, error: String(err) });",
+      "  }",
+      "}",
+      "",
+      "// The dashboard sends the blocked dates here.",
+      "function doPost(e) {",
+      "  try {",
+      "    var body = JSON.parse(e.postData.contents);",
+      "    if (body.key !== KEY) return out({ ok: false, error: 'Wrong key — paste the latest code from the dashboard.' });",
+      "    var sp = PropertiesService.getScriptProperties();",
+      "    sp.setProperty('feedToken', body.token);",
+      "    var n = 0;",
+      "    Object.keys(body.feeds || {}).forEach(function (pid) { sp.setProperty('feed_' + pid, JSON.stringify(body.feeds[pid])); n++; });",
+      "    return out({ ok: true, version: VERSION, saved: n });",
+      "  } catch (err) {",
+      "    return out({ ok: false, error: String(err) });",
+      "  }",
+      "}",
+      "",
+      "function serveFeed(pid, token) {",
+      "  var sp = PropertiesService.getScriptProperties();",
+      "  if (!token || token !== sp.getProperty('feedToken')) return ContentService.createTextOutput('Not found');",
+      "  var ranges = JSON.parse(sp.getProperty('feed_' + pid) || '[]');",
+      "  var stamp = Utilities.formatDate(new Date(), 'UTC', \"yyyyMMdd'T'HHmmss'Z'\");",
+      "  var lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//PropertyDashboard//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];",
+      "  ranges.forEach(function (r) {",
+      "    lines.push('BEGIN:VEVENT', 'UID:' + pid + '-' + r[0] + '-' + r[1] + '@dashboard', 'DTSTAMP:' + stamp,",
+      "      'DTSTART;VALUE=DATE:' + r[0], 'DTEND;VALUE=DATE:' + r[1], 'SUMMARY:' + (r[2] || 'Not available'), 'END:VEVENT');",
+      "  });",
+      "  lines.push('END:VCALENDAR');",
+      "  return ContentService.createTextOutput(lines.join('\\r\\n') + '\\r\\n').setMimeType(ContentService.MimeType.ICAL);",
+      "}",
+      "",
+      "function out(obj) {",
+      "  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);",
+      "}"
+    ].join('\n');
+  }
+
+  // ---- Blocks: dates you close from the dashboard ----
+  function blocksFor(pid){ return (calSync.blocks||[]).filter(function(b){return b.propertyId===pid && b.end>today();}); }
+  function blockOn(pid,d){ return (calSync.blocks||[]).find(function(b){return b.propertyId===pid && b.start<=d && d<b.end;}); }
+  function feedUrl(pid){ return calSync.proxyUrl?calSync.proxyUrl+'?feed='+encodeURIComponent(pid)+'&t='+calSync.feedToken:''; }
+  function feedRangesFor(pid){
+    var t=today(), out=[], inc=!!(calSync.includeChannelBookings||{})[pid];
+    var ymd=function(d){return d.replace(/-/g,'');};
+    blocksFor(pid).forEach(function(b){ out.push([ymd(b.start),ymd(b.end),'Blocked']); });
+    bookings.forEach(function(b){
+      if(b.propertyId!==pid || !b.checkIn || !b.checkOut || b.checkOut<=t || b.source==='ical') return;
+      var ch=b.channel||'';
+      if(!inc && (ch==='Airbnb'||ch==='Booking.com')) return;
+      out.push([ymd(b.checkIn),ymd(b.checkOut),'Reserved']);
+    });
+    return out;
+  }
+  var feedPublishMsg='';
+  function publishFeeds(){
+    if(!calSync.proxyUrl) return Promise.resolve();
+    var feeds={};
+    props.forEach(function(p){ feeds[p.id]=feedRangesFor(p.id); });
+    var body=JSON.stringify({key:calSync.proxyKey,token:calSync.feedToken,feeds:feeds});
+    return fetch(calSync.proxyUrl,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:body,redirect:'follow'})
+      .then(function(r){return r.text();}).then(function(txt){
+        var d; try{ d=JSON.parse(txt); }catch(e){ throw new Error('no-json'); }
+        if(!d.ok) throw new Error(d.error||'Unknown error');
+        if(!d.version || d.version<SCRIPT_VERSION) throw new Error('old-script');
+        calSync.lastPublish=new Date().toISOString(); feedPublishMsg='';
+        return saveCalSync();
+      }).catch(function(err){
+        feedPublishMsg=(err.message==='old-script'||err.message==='no-json')?'Your Google script needs the new code before blocks can reach Airbnb / Booking.com — see “Update your Google script” below.':('Couldn’t send blocks to your Google script: '+err.message);
+      }).then(function(){ render(); });
+  }
+  function addBlock(pid,start,endExclusive,reason){
+    calSync.blocks=calSync.blocks||[];
+    calSync.blocks.push({id:uid(),propertyId:pid,start:start,end:endExclusive,reason:reason||''});
+    return saveCalSync().then(publishFeeds);
+  }
+  function removeBlock(id){
+    calSync.blocks=(calSync.blocks||[]).filter(function(b){return b.id!==id;});
+    return saveCalSync().then(publishFeeds);
+  }
+
+  function renderBlocksSection(panel){
+    var box=el('div',{style:'background:var(--paper-raised);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin-bottom:20px'});
+    box.appendChild(el('div',{style:'font-weight:600;font-size:14px;margin-bottom:4px'},['Block dates']));
+    box.appendChild(el('div',{style:'font-size:12px;color:var(--ink-soft);line-height:1.55;margin-bottom:12px'},[
+      'Close dates for owner stays, repairs or deep cleaning. Blocks go into a calendar link per property that Airbnb and Booking.com import (set that up once, below). Airbnb and Booking.com only re-check imported calendars every few hours, so for a same-day block, also block it in their app.'
+    ]));
+    if(feedPublishMsg) box.appendChild(el('div',{style:'font-size:12px;color:var(--rust);margin-bottom:10px'},[feedPublishMsg]));
+    var form=el('form',{class:'row',style:'border-bottom:none;padding-bottom:4px;margin-bottom:8px'});
+    var pSel=el('select',{}); props.forEach(function(p){ pSel.appendChild(el('option',{value:p.id},[propShort(p.id)])); });
+    var sI=el('input',{type:'date',value:today()}), eI=el('input',{type:'date',value:today()});
+    var rI=el('input',{type:'text',placeholder:'e.g. Owner stay, aircon repair'});
+    var f=function(l,i){ return el('div',{class:'field'},[el('label',{},[l]),i]); };
+    [f('Property',pSel),f('First night',sI),f('Last night',eI),f('Reason (only you see this)',rI)].forEach(function(x){form.appendChild(x);});
+    form.appendChild(el('button',{type:'submit'},['Block']));
+    form.addEventListener('submit',function(e){
+      e.preventDefault();
+      if(!sI.value||!eI.value||eI.value<sI.value){ alert('Pick the first and last night to block.'); return; }
+      var endEx=addDays(eI.value,1);
+      var clash=bookings.find(function(b){return b.propertyId===pSel.value && b.checkIn<endEx && sI.value<b.checkOut;});
+      if(clash && !confirm(propShort(pSel.value)+' already has '+clash.guest+' ('+clash.checkIn+' → '+clash.checkOut+') on some of these nights. Block anyway?')) return;
+      addBlock(pSel.value,sI.value,endEx,rI.value.trim()).then(render);
+    });
+    box.appendChild(form);
+
+    var all=(calSync.blocks||[]).filter(function(b){return b.end>today();}).sort(function(a,b){return a.start.localeCompare(b.start);});
+    if(!all.length) box.appendChild(el('div',{style:'font-size:12px;color:var(--ink-soft)'},['No upcoming blocks.']));
+    all.forEach(function(b){
+      var n=daysBetween(b.start,b.end);
+      box.appendChild(el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line-soft)'},[
+        el('div',{style:'font-size:13px'},[
+          el('div',{style:'font-weight:500'},[propShort(b.propertyId)+' · '+weekdayShort(b.start)+' '+b.start.slice(5)+(n>1?' → '+weekdayShort(addDays(b.end,-1))+' '+addDays(b.end,-1).slice(5):'')+' ('+n+' night'+(n>1?'s':'')+')']),
+          b.reason?el('div',{style:'font-size:12px;color:var(--ink-soft)'},[b.reason]):null
+        ]),
+        el('button',{class:'small ghost',type:'button',onclick:function(){ if(confirm('Unblock these dates?')) removeBlock(b.id).then(render); }},['Unblock'])
+      ]));
+    });
+    var pubTxt=calSync.lastPublish?('Sent to your Google script '+new Date(calSync.lastPublish).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})):'Not sent yet';
+    box.appendChild(el('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--ink-soft)'},[
+      el('span',{},[pubTxt]),
+      calSync.proxyUrl?el('button',{class:'small ghost',type:'button',onclick:function(){ publishFeeds(); }},['Send now']):null
+    ]));
+    panel.appendChild(box);
+  }
+
+  function renderFeedLinks(panel){
+    panel.appendChild(el('div',{class:'section-title',style:'margin-top:8px'},['Dashboard calendar links (for Airbnb & Booking.com to import)']));
+    panel.appendChild(el('div',{style:'font-size:12px;color:var(--ink-soft);line-height:1.55;margin-bottom:10px'},[
+      'Each link contains that unit’s blocks plus Direct / Agoda / other bookings logged here, so those nights close on Airbnb and Booking.com too. Paste it once per listing — Airbnb: Calendar → Availability → Connect calendars → Import calendar. Booking.com extranet: Rates & Availability → Sync calendars → Import. (Menu names may differ slightly.) Tick “Include Airbnb/Booking.com bookings” only if those two channels aren’t already syncing with each other — and if you do, delete cancelled bookings here so their nights reopen.'
+    ]));
+    if(!calSync.proxyUrl){ panel.appendChild(el('div',{style:'font-size:12px;color:var(--amber);margin-bottom:20px'},['Finish the Google script setup below first — the links come from it.'])); return; }
+    var wrap=el('div',{style:'margin-bottom:24px'});
+    props.forEach(function(p){
+      var url=feedUrl(p.id);
+      var cb=el('input',{type:'checkbox'}); cb.checked=!!(calSync.includeChannelBookings||{})[p.id];
+      cb.addEventListener('change',function(){ calSync.includeChannelBookings=calSync.includeChannelBookings||{}; calSync.includeChannelBookings[p.id]=cb.checked; saveCalSync().then(publishFeeds); });
+      var st=el('span',{style:'font-size:12px;color:var(--green)'});
+      wrap.appendChild(el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--line-soft)'},[
+        el('div',{style:'font-size:13px;min-width:0'},[
+          el('div',{style:'font-weight:500'},[propShort(p.id)]),
+          el('label',{style:'display:flex;gap:6px;align-items:center;font-size:12px;color:var(--ink-soft);margin-top:3px'},[cb,'Include Airbnb/Booking.com bookings'])
+        ]),
+        el('div',{style:'display:flex;gap:6px;align-items:center'},[st,el('button',{class:'small ghost',type:'button',onclick:function(){
+          if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(function(){st.textContent='Copied';},function(){prompt('Copy this link:',url);});
+          else prompt('Copy this link:',url);
+        }},['Copy link'])])
+      ]));
+    });
+    panel.appendChild(wrap);
+  }
+
+  function renderCalSync(panel){
+    if(!calSync.proxyKey||!calSync.feedToken){ if(!calSync.proxyKey) calSync.proxyKey=randomKey(); if(!calSync.feedToken) calSync.feedToken=randomKey()+randomKey(); saveCalSync(); }
+    var box=function(children,extra){ return el('div',{style:'background:var(--paper-raised);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin-bottom:16px;'+(extra||'')},children); };
+    var small=function(text){ return el('div',{style:'font-size:12px;color:var(--ink-soft);line-height:1.55;margin-bottom:10px'},[text]); };
+
+    // status + actions
+    var last=calSync.lastSync?new Date(calSync.lastSync):null;
+    var lastTxt=last?last.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'never';
+    var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px'},[
+      el('div',{},[
+        el('div',{class:'section-title',style:'margin:0'},['Calendar sync']),
+        el('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:2px'},['Last synced: '+lastTxt+(calSyncMsg?' · '+calSyncMsg:'')])
+      ]),
+      el('button',{type:'button',onclick:function(){ calSyncMsg=''; syncAllCalendars(false); }},[calSyncBusy?'Syncing…':'Sync now'])
+    ]);
+    panel.appendChild(head);
+    panel.appendChild(small('Reads the iCal links of your Airbnb and Booking.com listings so new reservations and blocked dates show up here within hours, before you download any CSV. iCal only shares dates (no amounts, and usually no guest names), so CSV import still fills in the money. It syncs automatically when you open the dashboard if the last sync is over 2 hours old.'));
+
+    renderBlocksSection(panel);
+
+    // needs booking
+    var pending=calItemsNeedingBooking();
+    if(calSync.lastSync){
+      var pb=box([],pending.length?'background:var(--amber-l);border-color:var(--amber)':'');
+      pb.appendChild(el('div',{style:'font-weight:600;font-size:13px;margin-bottom:8px;color:'+(pending.length?'var(--amber)':'var(--green)')},[pending.length?('On your calendars but not in the dashboard ('+pending.length+')'):'Every reservation on your calendars is in the dashboard ✓']));
+      if(pending.length){
+        pb.appendChild(small('“Add” creates a placeholder booking with ₱0 so the cleaning schedule and pricing see it right away. When you later import the CSV, the import fills in the guest name and amount for the same dates instead of adding a duplicate. Booking.com calendars don’t say whether a date is a reservation or a manual block, so check those before adding.'));
+        pending.forEach(function(it){
+          var ev=it.ev, n=daysBetween(ev.start,ev.end);
+          pb.appendChild(el('div',{style:'display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px solid rgba(0,0,0,.06)'},[
+            el('div',{style:'font-size:13px;min-width:0'},[
+              el('div',{style:'font-weight:500'},[propShort(it.pid)+' · '+weekdayShort(ev.start)+' '+ev.start.slice(5)+' → '+weekdayShort(ev.end)+' '+ev.end.slice(5)+' ('+n+' night'+(n>1?'s':'')+')']),
+              el('div',{style:'font-size:12px;color:var(--ink-soft)'},[calEventLabel(ev)+(ev.phone4?' · phone …'+ev.phone4:'')])
+            ]),
+            el('div',{style:'display:flex;gap:6px'},[
+              el('button',{class:'small',type:'button',onclick:function(){ pushUndoSnapshot(); addBookingFromCal(it.pid,ev); save('bookings',bookings).then(render); }},['Add']),
+              el('button',{class:'small ghost',type:'button',onclick:function(){ calSync.dismissed[ev.uid]=true; saveCalSync().then(render); }},['Ignore'])
+            ])
+          ]));
+        });
+        if(pending.length>1) pb.appendChild(el('button',{class:'small ghost',type:'button',style:'margin-top:8px',onclick:function(){
+          var onlyRes=pending.filter(function(it){return it.ev.kind==='reserved';});
+          if(!onlyRes.length){ alert('Only Booking.com “unavailable” dates are left — add those one by one after checking.'); return; }
+          if(!confirm('Add '+onlyRes.length+' confirmed Airbnb reservation'+(onlyRes.length>1?'s':'')+' as placeholder bookings?')) return;
+          pushUndoSnapshot(); onlyRes.forEach(function(it){ addBookingFromCal(it.pid,it.ev); }); save('bookings',bookings).then(render);
+        }},['Add all Airbnb reservations']));
+      }
+      panel.appendChild(pb);
+    }
+
+    // per-property links
+    panel.appendChild(el('div',{class:'section-title',style:'margin-top:8px'},['Calendar links per property']));
+    panel.appendChild(small('Airbnb app/website: open the listing’s Calendar → Availability (or settings) → Connect / Sync calendars → Export calendar → copy the link. Booking.com extranet: Rates & Availability → Sync calendars → Export calendar. Menu names may be slightly different on your screen. Treat these links like passwords — anyone with one can see your booked dates.'));
+    var tbl=el('table');
+    tbl.appendChild(el('thead',{},[el('tr',{},[el('th',{},['Property']),el('th',{},['Airbnb iCal link']),el('th',{},['Booking.com iCal link']),el('th',{},['Upcoming'])])]));
+    var tb=el('tbody');
+    props.forEach(function(p){
+      var f=calSync.feeds[p.id]||{};
+      var cells=[el('td',{style:'white-space:nowrap'},[propShort(p.id)])];
+      FEEDS.forEach(function(fd){
+        var inp=el('input',{type:'url',placeholder:'https://….ics',style:'min-width:200px;font-size:13px'});
+        if(f[fd[0]]) inp.value=f[fd[0]];
+        inp.addEventListener('change',function(){ calSync.feeds[p.id]=calSync.feeds[p.id]||{}; calSync.feeds[p.id][fd[0]]=inp.value.trim(); saveCalSync(); });
+        var err=calSync.lastErrors[p.id+'|'+fd[0]];
+        cells.push(el('td',{},[inp, err?el('div',{style:'font-size:11px;color:var(--rust);margin-top:3px;max-width:260px'},[err]):null]));
+      });
+      var up=(calSync.events[p.id]||[]).filter(function(e){return e.end>today();});
+      var res=up.filter(function(e){return e.kind==='reserved';}).length;
+      cells.push(el('td',{style:'font-size:12px;color:var(--ink-soft);white-space:nowrap'},[up.length?(res+' reserved · '+(up.length-res)+' blocked'):'—']));
+      tb.appendChild(el('tr',{},cells));
+    });
+    tbl.appendChild(tb);
+    panel.appendChild(el('div',{class:'table-scroll',style:'margin-bottom:24px'},[tbl]));
+
+    renderFeedLinks(panel);
+
+    // setup
+    var setup=box([]);
+    setup.appendChild(el('div',{style:'font-weight:600;font-size:14px;margin-bottom:6px'},[calSync.proxyUrl?'Google script connection':'One-time setup: connect a free Google script']));
+    if(calSync.proxyUrl) setup.appendChild(el('div',{style:'font-size:12px;background:var(--amber-l);color:var(--ink);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px;line-height:1.5'},['Update your Google script: if you set it up before date blocking was added, open it at script.google.com, replace all the code with the code below, then Deploy → Manage deployments → pencil icon → Version: New version → Deploy. Your /exec link stays the same. Then tap Save & test.']));
+    setup.appendChild(small('Browsers aren’t allowed to read Airbnb or Booking.com calendar links directly, so a tiny script in your own Google account fetches them for the dashboard. It only accepts Airbnb, Booking.com and Agoda links, and only with your secret key. Do this once, on a computer or iPad browser:'));
+    var steps=['Go to script.google.com (signed in to your Google account) and tap New project.','Delete everything in the editor, then paste the code (use the Copy code button below). Tap the save icon.','Tap Deploy → New deployment → gear icon → Web app. Set Execute as: Me, and Who has access: Anyone. Tap Deploy and allow the permissions it asks for (Google may show an “unverified app” warning because you wrote it yourself — tap Advanced → Go to project).','Copy the Web app URL (it ends in /exec), paste it below, then tap Test.'];
+    var ol=el('ol',{style:'font-size:13px;line-height:1.6;padding-left:20px;margin:0 0 12px'});
+    steps.forEach(function(s){ ol.appendChild(el('li',{style:'margin-bottom:4px'},[s])); });
+    setup.appendChild(ol);
+    var pre=el('pre',{style:'background:var(--line-soft);border-radius:var(--radius-sm);padding:12px;font-size:11px;overflow-x:auto;max-height:180px;margin:0 0 10px;font-family:JetBrains Mono,monospace'},[scriptCode()]);
+    setup.appendChild(pre);
+    var copyStatus=el('span',{style:'font-size:12px;color:var(--green);margin-left:8px'});
+    setup.appendChild(el('div',{style:'margin-bottom:14px'},[el('button',{class:'small ghost',type:'button',onclick:function(){
+      var code=scriptCode();
+      if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(function(){copyStatus.textContent='Copied';},function(){prompt('Copy this code:',code);});
+      else prompt('Copy this code:',code);
+    }},['Copy code']),copyStatus]));
+    var urlI=el('input',{type:'url',placeholder:'https://script.google.com/macros/s/…/exec',style:'font-size:13px'});
+    urlI.value=calSync.proxyUrl;
+    var testStatus=el('div',{style:'font-size:12px;margin-top:8px;color:var(--ink-soft)'});
+    setup.appendChild(el('div',{style:'display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap'},[
+      el('div',{style:'flex:1 1 260px;display:flex;flex-direction:column;gap:5px'},[el('label',{style:'font-size:11px;color:var(--ink-soft)'},['Web app URL']),urlI]),
+      el('button',{type:'button',onclick:function(){
+        var u=urlI.value.trim();
+        if(!/^https:\/\/script\.google\.com\/.+\/exec/.test(u)){ testStatus.style.color='var(--rust)'; testStatus.textContent='That doesn’t look like a Web app URL — it should start with https://script.google.com/ and end in /exec.'; return; }
+        calSync.proxyUrl=u; saveCalSync();
+        testStatus.style.color='var(--ink-soft)'; testStatus.textContent='Testing…';
+        fetch(u+'?key='+encodeURIComponent(calSync.proxyKey)+'&ping=1',{redirect:'follow'}).then(function(r){return r.text();}).then(function(txt){
+          var d; try{ d=JSON.parse(txt); }catch(e){ throw new Error('bad'); }
+          if(d.error && /Wrong key/.test(d.error)){ testStatus.style.color='var(--rust)'; testStatus.textContent='Connected, but the key doesn’t match. Copy the code again, paste it into the script, then Deploy → Manage deployments → edit → Version: New version → Deploy.'; return; }
+          if(!d.version || d.version<SCRIPT_VERSION){ testStatus.style.color='var(--amber)'; testStatus.textContent='Connected, but your script is the older version. Copy the code again, paste it over the old code, then Deploy → Manage deployments → pencil icon → Version: New version → Deploy. The /exec URL stays the same.'; return; }
+          testStatus.style.color='var(--green)'; testStatus.textContent='Connected ✓ Paste your calendar links, tap Sync now, and copy the dashboard links into Airbnb / Booking.com.'; publishFeeds();
+        }).catch(function(){ testStatus.style.color='var(--rust)'; testStatus.textContent='Couldn’t reach the script. Check that “Who has access” is set to Anyone and that you copied the /exec URL.'; });
+      }},['Save & test'])
+    ]));
+    setup.appendChild(testStatus);
+    setup.appendChild(el('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:12px'},['Secret key: ',el('span',{class:'mono'},[calSync.proxyKey]),' — it’s already inside the code above.']));
+    panel.appendChild(setup);
+  }
+  // ================= end CALENDAR SYNC =================
+
+  // ================= PRICING: rate suggestions, comps, channel update tracking =================
+  var pricing={settings:{},events:[],comps:[],overrides:{},applied:{},seeded:false};
+  var pricingView='calendar', pricingProp=null, pricingDays=30, pricingCompProp=null;
+  var PRICING_DEFAULTS={weekendPct:15,targetOcc:70,lastMinuteDays:3,lastMinutePct:15,orphanPct:15,farOutDays:60,farOutPct:5,paceWindow:45,paceStepPct:10,roundTo:50};
+  var CHANNELS=[['airbnb','Airbnb'],['booking','Booking.com']];
+
+  function normalizePricing(p){
+    p=p||{};
+    return {settings:p.settings||{},events:p.events||[],comps:p.comps||[],overrides:p.overrides||{},applied:p.applied||{},seeded:!!p.seeded};
+  }
+  function savePricing(){ return save('pricing',pricing); }
+  function starterEvents(){
+    // Starter values only — dates and % should be checked and adjusted to your own market.
+    return [
+      {id:uid(),name:'Undas long weekend',start:'2026-10-30',end:'2026-11-02',pct:10},
+      {id:uid(),name:'Christmas & New Year',start:'2026-12-23',end:'2027-01-02',pct:25},
+      {id:uid(),name:'Sinulog 2027 (verify dates)',start:'2027-01-15',end:'2027-01-18',pct:40},
+      {id:uid(),name:'Holy Week 2027 (verify dates)',start:'2027-03-24',end:'2027-03-28',pct:20}
+    ];
+  }
+  function pSettings(pid){
+    var s=pricing.settings[pid]||{}, out={};
+    for(var k in PRICING_DEFAULTS){ out[k]=(s[k]!==undefined&&s[k]!==''&&s[k]!==null&&!isNaN(Number(s[k])))?Number(s[k]):PRICING_DEFAULTS[k]; }
+    out.base=Number(s.base)||0; out.min=Number(s.min)||0; out.max=Number(s.max)||0;
+    out.channels=s.channels||{airbnb:true,booking:true};
+    return out;
+  }
+  function setSetting(pid,key,val){
+    pricing.settings[pid]=pricing.settings[pid]||{};
+    pricing.settings[pid][key]=val;
+    savePricing();
+  }
+  function pKey(pid,d){ return pid+'|'+d; }
+
+  // Night index: which booking occupies each night, per property (built once per render)
+  var _nightIdx=null, _nightIdxSig='';
+  function nightIndex(){
+    var sig=bookings.length+':'+(bookings.length?bookings[bookings.length-1].id:'');
+    if(_nightIdx && sig===_nightIdxSig) return _nightIdx;
+    var idx={}, cutoff=addDays(today(),-400);
+    bookings.forEach(function(b){
+      if(!b.checkIn||!b.checkOut||b.checkOut<cutoff) return;
+      var m=idx[b.propertyId]=idx[b.propertyId]||{};
+      var n=daysBetween(b.checkIn,b.checkOut);
+      for(var i=0;i<n&&i<120;i++){ m[addDays(b.checkIn,i)]=b; }
+    });
+    (calSync.blocks||[]).forEach(function(bl){
+      var m=idx[bl.propertyId]=idx[bl.propertyId]||{};
+      var n=daysBetween(bl.start,bl.end);
+      for(var i=0;i<n&&i<120;i++){ var d=addDays(bl.start,i); if(!m[d]) m[d]={fromCal:true,blockId:bl.id,guest:'Blocked'+(bl.reason?' — '+bl.reason:''),channel:'Dashboard',checkIn:bl.start,checkOut:bl.end,amount:0,kind:'blocked'}; }
+    });
+    Object.keys(calSync.events||{}).forEach(function(pid){
+      var m=idx[pid]=idx[pid]||{};
+      (calSync.events[pid]||[]).forEach(function(ev){
+        var n=daysBetween(ev.start,ev.end);
+        for(var i=0;i<n&&i<120;i++){ var d=addDays(ev.start,i); if(!m[d]) m[d]={fromCal:true,guest:calEventLabel(ev),channel:feedLabel(ev.feed),checkIn:ev.start,checkOut:ev.end,amount:0,kind:ev.kind}; }
+      });
+    });
+    _nightIdx=idx; _nightIdxSig=sig;
+    return idx;
+  }
+  function bookedOn(pid,d){ var m=nightIndex()[pid]; return m?m[d]:null; }
+
+  function histStats(pid,days){
+    var t=today(), from=addDays(t,-days), nights=0, rev=0, stays=0, ch={};
+    bookings.forEach(function(b){
+      if(b.propertyId!==pid||!b.checkIn||b.checkIn<from||b.checkIn>=t) return;
+      var n=daysBetween(b.checkIn,b.checkOut); if(n<=0) return;
+      nights+=n; rev+=Number(b.amount||0); stays++;
+      var c=b.channel||'Other'; ch[c]=(ch[c]||0)+1;
+    });
+    return {nights:nights,rev:rev,stays:stays,adr:nights?rev/nights:0,occ:days?Math.min(100,nights/days*100):0,avgStay:stays?nights/stays:0,channels:ch};
+  }
+  function compAvg(pid,forDate){
+    var since=addDays(today(),-30);
+    var list=pricing.comps.filter(function(c){
+      if(c.propertyId!==pid||!Number(c.price)) return false;
+      if(forDate) return c.forDate===forDate;
+      return (c.checkedOn||'')>=since;
+    });
+    if(!list.length) return {avg:0,count:0};
+    var sum=list.reduce(function(s,c){return s+Number(c.price);},0);
+    return {avg:sum/list.length,count:list.length};
+  }
+  function resolveBase(pid){
+    var s=pSettings(pid);
+    if(s.base) return {value:s.base,source:'your base'};
+    var c=compAvg(pid); if(c.avg) return {value:c.avg,source:'comp average'};
+    var h=histStats(pid,90); if(h.adr) return {value:h.adr,source:'your 90-day average'};
+    return {value:0,source:''};
+  }
+  function eventsOn(d){ return pricing.events.filter(function(e){ return e.start && e.end && e.start<=d && d<=e.end; }); }
+  function occAround(pid,d){
+    var booked=0, total=0;
+    for(var i=-7;i<7;i++){
+      var dd=addDays(d,i); if(dd<today()) continue;
+      total++; if(bookedOn(pid,dd)) booked++;
+    }
+    return total?booked/total*100:0;
+  }
+  function gapAround(pid,d){
+    // length of the open stretch containing night d, and whether it is boxed in by bookings on both sides
+    var back=0, fwd=0;
+    while(back<10 && !bookedOn(pid,addDays(d,-(back+1)))) back++;
+    while(fwd<10 && !bookedOn(pid,addDays(d,fwd+1))) fwd++;
+    return {len:back+fwd+1, boxed:back<10 && fwd<10};
+  }
+  function suggestPrice(pid,d){
+    var s=pSettings(pid), b=resolveBase(pid);
+    if(!b.value) return {price:0,reasons:['No base yet — set one in Rules'],pct:0};
+    var pct=0, reasons=['Base '+fmt(b.value)+' ('+b.source+')'];
+    function add(p,label){ if(!p) return; pct+=p; reasons.push((p>0?'+':'')+p+'% '+label); }
+    var dow=new Date(d+'T00:00:00').getDay();
+    if(dow===5||dow===6) add(s.weekendPct,'weekend');
+    var evs=eventsOn(d);
+    if(evs.length){
+      var top=evs.slice().sort(function(a,c){return Math.abs(Number(c.pct))-Math.abs(Number(a.pct));})[0];
+      add(Number(top.pct)||0,top.name);
+    }
+    var lead=daysBetween(today(),d);
+    if(lead<=s.lastMinuteDays) add(-s.lastMinutePct,'last-minute');
+    else if(lead>=s.farOutDays) add(s.farOutPct,'far out (room to drop later)');
+    if(lead>s.lastMinuteDays && lead<=s.paceWindow){
+      var occ=occAround(pid,d);
+      if(occ<s.targetOcc-25) add(-s.paceStepPct,'slow pace ('+Math.round(occ)+'% booked nearby)');
+      else if(occ>=Math.min(95,s.targetOcc+15)) add(s.paceStepPct,'busy ('+Math.round(occ)+'% booked nearby)');
+    }
+    var g=gapAround(pid,d);
+    if(g.boxed && g.len<=2) add(-s.orphanPct,g.len+'-night gap');
+    var price=b.value*(1+pct/100);
+    if(s.min && price<s.min){ price=s.min; reasons.push('held at your minimum'); }
+    if(s.max && price>s.max){ price=s.max; reasons.push('capped at your maximum'); }
+    var r=s.roundTo||1; price=Math.round(price/r)*r;
+    return {price:price,reasons:reasons,pct:pct,gap:(g.boxed&&g.len<=2)?g.len:0};
+  }
+  function finalPrice(pid,d){
+    var o=pricing.overrides[pKey(pid,d)];
+    if(o) return {price:Number(o),manual:true};
+    return {price:suggestPrice(pid,d).price,manual:false};
+  }
+  function channelState(pid,d,ch,price){
+    var a=pricing.applied[pKey(pid,d)];
+    var was=a&&a[ch]?Number(a[ch]):0;
+    return {done:!!was && was===price, was:was};
+  }
+  function markApplied(pid,d,ch,price,on){
+    var k=pKey(pid,d);
+    pricing.applied[k]=pricing.applied[k]||{};
+    if(on) pricing.applied[k][ch]=price; else delete pricing.applied[k][ch];
+  }
+  function pendingUpdates(pid,days){
+    var t=today(), count=0, s=pSettings(pid);
+    for(var i=0;i<days;i++){
+      var d=addDays(t,i); if(bookedOn(pid,d)) continue;
+      var fp=finalPrice(pid,d).price; if(!fp) continue;
+      CHANNELS.forEach(function(c){ if(s.channels[c[0]] && !channelState(pid,d,c[0],fp).done) count++; });
+    }
+    return count;
+  }
+  function prunePricingHistory(){
+    // keep data small: drop overrides/applied marks older than 60 days
+    var cut=addDays(today(),-60), changed=false;
+    ['overrides','applied'].forEach(function(k){
+      Object.keys(pricing[k]).forEach(function(key){ if(key.split('|')[1]<cut){ delete pricing[k][key]; changed=true; } });
+    });
+    return changed;
+  }
+  function shortDate(d){ return new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
+  function pricingCSV(filename,rows){
+    var esc=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+    triggerDownload(new Blob([rows.map(function(r){return r.map(esc).join(',');}).join('\n')],{type:'text/csv'}),filename);
+  }
+  function pCard(children,extra){ return el('div',{style:'background:var(--paper-raised);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;'+(extra||'')},children); }
+  function pNote(text){ return el('div',{style:'font-size:12px;color:var(--ink-soft);margin-bottom:14px;max-width:680px;line-height:1.5'},[text]); }
+  function numInput(val,placeholder,onchange,w){
+    var i=el('input',{type:'number',inputmode:'decimal',placeholder:placeholder||'',style:'width:'+(w||'100%')});
+    if(val!==undefined&&val!==null&&val!=='') i.value=val;
+    i.addEventListener('change',function(){ onchange(i.value===''?'':Number(i.value)); });
+    return i;
+  }
+  function pField(label,input){ return el('div',{class:'field',style:'display:flex;flex-direction:column;gap:5px;flex:1 1 120px;min-width:110px'},[el('label',{style:'font-size:11px;color:var(--ink-soft)'},[label]),input]); }
+
+  function renderPricing(panel){
+    if(!pricing.seeded){ pricing.events=starterEvents().concat(pricing.events); pricing.seeded=true; prunePricingHistory(); savePricing(); }
+    if(props.length===0){ panel.appendChild(el('div',{class:'empty'},['Add properties first, then pricing suggestions appear here.'])); return; }
+    if(!pricingProp || !props.some(function(p){return p.id===pricingProp;})) pricingProp=props[0].id;
+
+    var views=[['calendar','Rate calendar'],['portfolio','All units'],['comps','Competitors'],['rules','Rules & events'],['insights','Insights']];
+    var bar=el('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px'});
+    views.forEach(function(v){
+      bar.appendChild(el('button',{type:'button',class:pricingView===v[0]?'small':'small ghost',onclick:function(){pricingView=v[0];render();}},[v[1]]));
+    });
+    panel.appendChild(bar);
+
+    if(pricingView==='calendar') renderPricingCalendar(panel);
+    else if(pricingView==='portfolio') renderPricingPortfolio(panel);
+    else if(pricingView==='comps') renderPricingComps(panel);
+    else if(pricingView==='rules') renderPricingRules(panel);
+    else renderPricingInsights(panel);
+  }
+
+  function propPicker(current,onpick){
+    var sel=el('select',{});
+    props.forEach(function(p){ var o=el('option',{value:p.id},[propShort(p.id)]); if(p.id===current) o.selected=true; sel.appendChild(o); });
+    sel.addEventListener('change',function(){ onpick(sel.value); });
+    return sel;
+  }
+
+  function renderPricingCalendar(panel){
+    var pid=pricingProp, s=pSettings(pid), t=today();
+    var daysSel=el('select',{});
+    [14,30,60,90].forEach(function(n){ var o=el('option',{value:n},[n+' days']); if(n===pricingDays) o.selected=true; daysSel.appendChild(o); });
+    daysSel.addEventListener('change',function(){ pricingDays=Number(daysSel.value); render(); });
+    panel.appendChild(el('div',{style:'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px'},[
+      pField('Property',propPicker(pid,function(v){pricingProp=v;render();})), pField('Show',daysSel)
+    ]));
+
+    var base=resolveBase(pid), h=histStats(pid,90), c=compAvg(pid);
+    var pend=pendingUpdates(pid,pricingDays);
+    panel.appendChild(el('div',{class:'metrics',style:'padding:0 0 16px;border-bottom:none'},[
+      el('div',{class:'metric'},[el('div',{class:'lbl'},['Base used']),el('div',{class:'val mono'},[base.value?fmt(base.value):'—'])]),
+      el('div',{class:'metric'},[el('div',{class:'lbl'},['Your 90-day avg / night']),el('div',{class:'val mono'},[h.adr?fmt(h.adr):'—'])]),
+      el('div',{class:'metric'},[el('div',{class:'lbl'},['Competitor avg']),el('div',{class:'val mono'},[c.avg?fmt(c.avg):'—'])]),
+      el('div',{class:'metric'},[el('div',{class:'lbl'},['Prices to update']),el('div',{class:'val mono',style:pend?'color:var(--rust)':'color:var(--green)'},[String(pend)])])
+    ]));
+    if(!base.value){
+      panel.appendChild(pCard([el('div',{style:'font-size:13px'},['No base price yet for this unit. Set one in ',el('a',{href:'#',onclick:function(e){e.preventDefault();pricingView='rules';render();}},['Rules']),', or log a few competitor prices.'])],'background:var(--amber-l);border-color:var(--amber)'));
+    }
+    panel.appendChild(pNote('Suggested = base adjusted for weekends, events, how booked the nearby dates are, last-minute and gap nights. Type in “My price” to override. After you change the price on Airbnb or Booking.com, tick that channel — if the price changes again later, the tick clears so you always know what still needs updating. Amounts from imports are net payouts, so “paid/night” on booked dates is net, not the listed price.'));
+
+    var dates=[]; for(var i=0;i<pricingDays;i++) dates.push(addDays(t,i));
+    var activeCh=CHANNELS.filter(function(ch){return s.channels[ch[0]];});
+
+    var actions=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px'});
+    activeCh.forEach(function(ch){
+      actions.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
+        if(!confirm('Mark every open date shown as already updated on '+ch[1]+' at the current price?')) return;
+        pushUndoSnapshot();
+        dates.forEach(function(d){ if(bookedOn(pid,d)) return; var fp=finalPrice(pid,d).price; if(fp) markApplied(pid,d,ch[0],fp,true); });
+        savePricing(); render();
+      }},['✓ All updated on '+ch[1]]));
+    });
+    actions.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
+      var lines=[propShort(pid)+' rates'];
+      dates.forEach(function(d){ if(bookedOn(pid,d)) return; var fp=finalPrice(pid,d).price; if(fp) lines.push(weekdayShort(d)+' '+shortDate(d)+': '+fmt(fp)); });
+      var txt=lines.join('\n');
+      if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){alert('Copied '+(lines.length-1)+' dates. Paste into Notes to keep beside the Airbnb / Booking.com app.');},function(){prompt('Copy these rates:',txt);}); }
+      else prompt('Copy these rates:',txt);
+    }},['Copy rate list']));
+    actions.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
+      var rows=[['Property','Date','Day','Status','Suggested','My price','Final','Why','Airbnb updated','Booking.com updated']];
+      dates.forEach(function(d){
+        var bk=bookedOn(pid,d), sg=suggestPrice(pid,d), fp=finalPrice(pid,d).price;
+        rows.push([propShort(pid),d,weekdayShort(d),bk?('Booked: '+bk.guest):'Open',bk?'':sg.price,pricing.overrides[pKey(pid,d)]||'',bk?'':fp,bk?'':sg.reasons.join('; '),
+          bk?'':(channelState(pid,d,'airbnb',fp).done?'yes':'no'),bk?'':(channelState(pid,d,'booking',fp).done?'yes':'no')]);
+      });
+      pricingCSV('rates-'+propShort(pid).replace(/[^a-z0-9]+/gi,'-')+'-'+t+'.csv',rows);
+    }},['Download CSV']));
+    var hasOverrides=dates.some(function(d){return pricing.overrides[pKey(pid,d)];});
+    if(hasOverrides) actions.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
+      if(!confirm('Remove your manual prices for the dates shown and go back to the suggestions?')) return;
+      pushUndoSnapshot();
+      dates.forEach(function(d){ delete pricing.overrides[pKey(pid,d)]; });
+      savePricing(); render();
+    }},['Clear my prices']));
+    panel.appendChild(actions);
+
+    var list=el('div',{style:'border-top:1px solid var(--line)'});
+    var lastMonth='';
+    dates.forEach(function(d){
+      var mk=d.slice(0,7);
+      if(mk!==lastMonth){
+        lastMonth=mk;
+        list.appendChild(el('div',{style:'font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);padding:14px 0 6px'},[new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric'})]));
+      }
+      var dow=new Date(d+'T00:00:00').getDay(), wknd=(dow===5||dow===6);
+      var dateCol=el('div',{style:'width:64px;flex-shrink:0'},[
+        el('div',{style:'font-size:11px;color:'+(wknd?'var(--accent)':'var(--ink-soft)')+';font-weight:'+(wknd?'600':'400')},[weekdayShort(d)]),
+        el('div',{class:'mono',style:'font-size:15px'},[String(Number(d.slice(8)))])
+      ]);
+      var bk=bookedOn(pid,d);
+      var row=el('div',{style:'display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line-soft)'});
+      row.appendChild(dateCol);
+      if(bk){
+        var n=Math.max(1,daysBetween(bk.checkIn,bk.checkOut));
+        row.style.background='var(--accent-l)';
+        if(bk.fromCal){
+          row.appendChild(el('div',{style:'flex:1;font-size:13px;padding-right:8px'},[
+            el('div',{style:'font-weight:500;color:var(--teal-dark)'},[bk.guest]),
+            el('div',{style:'font-size:12px;color:var(--ink-soft)'},[bk.blockId?'Blocked from this dashboard':'From calendar sync · not in Bookings yet'])
+          ]));
+          if(bk.blockId) row.appendChild(el('button',{class:'small ghost',type:'button',style:'flex-shrink:0',onclick:function(){ if(confirm('Unblock '+shortDate(bk.checkIn)+(daysBetween(bk.checkIn,bk.checkOut)>1?' \u2192 '+shortDate(addDays(bk.checkOut,-1)):'')+'?')) removeBlock(bk.blockId).then(render); }},['Unblock']));
+          list.appendChild(row); return;
+        }
+        row.appendChild(el('div',{style:'flex:1;font-size:13px;padding-right:8px'},[
+          el('div',{style:'font-weight:500;color:var(--teal-dark)'},['Booked — '+bk.guest]),
+          el('div',{style:'font-size:12px;color:var(--ink-soft)'},[(bk.channel||'')+' · '+fmt(Number(bk.amount||0)/n)+' paid/night (net)'])
+        ]));
+        list.appendChild(row); return;
+      }
+      var sg=suggestPrice(pid,d), fp=finalPrice(pid,d);
+      var evs=eventsOn(d);
+      var mid=el('div',{style:'flex:1;min-width:0'},[
+        el('div',{style:'display:flex;align-items:baseline;gap:8px;flex-wrap:wrap'},[
+          el('span',{class:'mono',style:'font-size:16px;font-weight:500'},[sg.price?fmt(sg.price):'—']),
+          el('span',{style:'font-size:11px;color:var(--ink-soft)'},['suggested']),
+          evs.length?el('span',{class:'badge',style:'background:var(--amber-l);color:var(--amber)'},[evs[0].name]):null,
+          sg.gap?el('span',{class:'badge',style:'background:var(--rust-l);color:var(--rust)'},['gap — lower min stay']):null
+        ]),
+        el('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:2px;line-height:1.45'},[sg.reasons.slice(1).join(' · ')||'No adjustments'])
+      ]);
+      var comp=compAvg(pid,d);
+      if(comp.count) mid.appendChild(el('div',{style:'font-size:11px;color:var(--accent);margin-top:2px'},['Competitors this date: '+fmt(comp.avg)+' avg ('+comp.count+')']));
+      row.appendChild(mid);
+
+      var right=el('div',{style:'display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0;width:118px'});
+      var ov=pricing.overrides[pKey(pid,d)];
+      var inp=el('input',{type:'number',inputmode:'decimal',placeholder:'My price',style:'width:118px;min-height:38px;padding:6px 8px;font-size:15px;'+(ov?'border-color:var(--accent);':'')});
+      if(ov) inp.value=ov;
+      inp.addEventListener('change',function(){
+        var v=Number(inp.value);
+        if(v>0) pricing.overrides[pKey(pid,d)]=v; else delete pricing.overrides[pKey(pid,d)];
+        savePricing(); render();
+      });
+      right.appendChild(inp);
+      var chips=el('div',{style:'display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end'});
+      activeCh.forEach(function(ch){
+        var st=channelState(pid,d,ch[0],fp.price);
+        var label=(st.done?'✓ ':'')+(ch[0]==='airbnb'?'Airbnb':'Booking');
+        var chip=el('button',{type:'button',title:st.was&&!st.done?('Last set at '+fmt(st.was)):'',style:'padding:3px 8px;font-size:11px;min-height:26px;border-radius:20px;'+(st.done?'background:var(--green-l);color:var(--green);border:1px solid var(--green-l)':(st.was?'background:var(--rust-l);color:var(--rust);border:1px solid var(--rust-l)':'background:transparent;color:var(--ink-soft);border:1px solid var(--line)'))},[label]);
+        chip.addEventListener('click',function(){ if(!fp.price) return; markApplied(pid,d,ch[0],fp.price,!st.done); savePricing(); render(); });
+        chips.appendChild(chip);
+      });
+      right.appendChild(chips);
+      right.appendChild(el('button',{type:'button',style:'padding:2px 8px;font-size:11px;min-height:24px;background:transparent;color:var(--ink-soft);border:none;text-decoration:underline',onclick:function(){ if(confirm('Block '+weekdayShort(d)+' '+shortDate(d)+' for '+propShort(pid)+'?')) addBlock(pid,d,addDays(d,1),'').then(render); }},['Block night']));
+      row.appendChild(right);
+      list.appendChild(row);
+    });
+    panel.appendChild(list);
+  }
+
+  function renderPricingPortfolio(panel){
+    var t=today(), days=14, dates=[];
+    for(var i=0;i<days;i++) dates.push(addDays(t,i));
+    panel.appendChild(pNote('Next 14 nights for every unit. Shaded = booked. Red price = not yet updated on at least one channel. Tap a unit to open its rate calendar.'));
+    var tbl=el('table',{style:'min-width:'+(180+days*70)+'px'});
+    var hr=el('tr',{},[el('th',{style:'position:sticky;left:0;background:var(--paper);z-index:1'},['Unit']),el('th',{},['Next 30d booked']),el('th',{},['To update'])]);
+    dates.forEach(function(d){ var dow=new Date(d+'T00:00:00').getDay(); hr.appendChild(el('th',{style:'text-align:center;'+((dow===5||dow===6)?'color:var(--accent)':'')},[weekdayShort(d)+' '+Number(d.slice(8))])); });
+    tbl.appendChild(el('thead',{},[hr]));
+    var tb=el('tbody');
+    var totals={booked:0,nights:0,pend:0};
+    props.forEach(function(p){
+      var s=pSettings(p.id), booked30=0;
+      for(var j=0;j<30;j++){ if(bookedOn(p.id,addDays(t,j))) booked30++; }
+      var pend=pendingUpdates(p.id,30);
+      totals.booked+=booked30; totals.nights+=30; totals.pend+=pend;
+      var tr=el('tr',{},[
+        el('td',{style:'position:sticky;left:0;background:var(--paper);z-index:1;white-space:nowrap'},[el('a',{href:'#',onclick:function(e){e.preventDefault();pricingProp=p.id;pricingView='calendar';render();}},[propShort(p.id)])]),
+        el('td',{class:'mono'},[Math.round(booked30/30*100)+'%']),
+        el('td',{class:'mono',style:pend?'color:var(--rust)':'color:var(--green)'},[String(pend)])
+      ]);
+      dates.forEach(function(d){
+        var bk=bookedOn(p.id,d);
+        if(bk){ tr.appendChild(el('td',{style:'background:var(--accent-l);text-align:center;font-size:11px;color:var(--teal-dark)'},[bk.fromCal?(bk.kind==='reserved'?'Reserved':'Blocked'):(bk.guest||'●').split(' ')[0].slice(0,8)])); return; }
+        var fp=finalPrice(p.id,d).price;
+        var behind=fp && CHANNELS.some(function(c){ return s.channels[c[0]] && !channelState(p.id,d,c[0],fp).done; });
+        tr.appendChild(el('td',{class:'mono',style:'text-align:center;font-size:12px;'+(behind?'color:var(--rust)':'')},[fp?Math.round(fp).toLocaleString():'—']));
+      });
+      tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);
+    panel.appendChild(el('div',{class:'metrics',style:'padding:0 0 16px;grid-template-columns:repeat(3,1fr);border-bottom:none'},[
+      el('div',{class:'metric'},[el('div',{class:'lbl'},['Portfolio booked, next 30 nights']),el('div',{class:'val mono'},[(totals.nights?Math.round(totals.booked/totals.nights*100):0)+'%'])]),
+      el('div',{class:'metric'},[el('div',{class:'lbl'},['Open nights, next 30']),el('div',{class:'val mono'},[String(totals.nights-totals.booked)])]),
+      el('div',{class:'metric'},[el('div',{class:'lbl'},['Prices to update']),el('div',{class:'val mono',style:totals.pend?'color:var(--rust)':''},[String(totals.pend)])])
+    ]));
+    panel.appendChild(el('div',{class:'table-scroll'},[tbl]));
+  }
+
+  function renderPricingComps(panel){
+    if(!pricingCompProp || !props.some(function(p){return p.id===pricingCompProp;})) pricingCompProp=pricingProp;
+    var pid=pricingCompProp;
+    panel.appendChild(pNote('Log what similar nearby listings charge. Open the Airbnb or Booking.com app, search your area with your unit’s guest count and a date, and note 5–8 listings that compete with yours (same size, similar quality). A quick weekly check of a weekday and a weekend date is enough. Checks from the last 30 days make up the competitor average.'));
+    var form=el('form',{class:'row'});
+    var pSel=propPicker(pid,function(v){pricingCompProp=v;render();});
+    var nameI=el('input',{type:'text',placeholder:'e.g. Avida T2 studio, 4.9★'});
+    var linkI=el('input',{type:'url',placeholder:'Optional link'});
+    var chI=el('select',{}); ['Airbnb','Booking.com','Agoda','Other'].forEach(function(c){chI.appendChild(el('option',{value:c},[c]));});
+    var forI=el('input',{type:'date',value:addDays(today(),7)});
+    var priceI=el('input',{type:'number',inputmode:'decimal',placeholder:'Price per night'});
+    [pField('Your unit',pSel),pField('Competitor',nameI),pField('Channel',chI),pField('For night of',forI),pField('Their price (₱/night)',priceI),pField('Link',linkI)].forEach(function(f){form.appendChild(f);});
+    form.appendChild(el('button',{type:'submit'},['Add']));
+    form.addEventListener('submit',function(e){
+      e.preventDefault();
+      var price=Number(priceI.value); if(!price||!nameI.value.trim()){ alert('Add the competitor name and price.'); return; }
+      pricing.comps.push({id:uid(),propertyId:pSel.value,name:nameI.value.trim(),link:linkI.value.trim(),channel:chI.value,forDate:forI.value,checkedOn:today(),price:price});
+      pricingCompProp=pSel.value; savePricing(); render();
+    });
+    panel.appendChild(form);
+
+    var c=compAvg(pid), s=pSettings(pid), h=histStats(pid,90);
+    var summary=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px'},[
+      el('div',{style:'font-size:13px'},[propShort(pid)+': competitor average '+(c.avg?fmt(c.avg)+' from '+c.count+' checks':'—')+' · your base '+(s.base?fmt(s.base):'not set')+' · your 90-day avg '+(h.adr?fmt(h.adr):'—')])
+    ]);
+    if(c.avg) summary.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
+      var v=Math.round(c.avg/50)*50;
+      if(!confirm('Set '+propShort(pid)+' base price to '+fmt(v)+'?')) return;
+      pushUndoSnapshot(); setSetting(pid,'base',v); render();
+    }},['Use as my base']));
+    panel.appendChild(summary);
+
+    var list=pricing.comps.filter(function(x){return x.propertyId===pid;}).sort(function(a,b){return (b.checkedOn||'').localeCompare(a.checkedOn||'');});
+    if(!list.length){ panel.appendChild(el('div',{class:'empty'},['No competitor prices logged for this unit yet.'])); return; }
+    var tbl=el('table');
+    tbl.appendChild(el('thead',{},[el('tr',{},[el('th',{},['Checked']),el('th',{},['Competitor']),el('th',{},['Channel']),el('th',{},['For night']),el('th',{},['Price']),el('th',{},['vs your price']),el('th',{},[''])])]));
+    var tb=el('tbody');
+    list.forEach(function(x){
+      var mine=x.forDate?finalPrice(pid,x.forDate).price:0;
+      var diff=mine?((mine-x.price)/x.price*100):null;
+      tb.appendChild(el('tr',{},[
+        el('td',{class:'mono'},[x.checkedOn||'']),
+        el('td',{},[x.link?el('a',{href:x.link,target:'_blank',rel:'noopener'},[x.name]):x.name]),
+        el('td',{},[x.channel||'']),
+        el('td',{class:'mono'},[x.forDate?(weekdayShort(x.forDate)+' '+shortDate(x.forDate)):'']),
+        el('td',{class:'mono'},[fmt(x.price)]),
+        el('td',{class:'mono',style:diff===null?'':(diff>10?'color:var(--rust)':(diff<-10?'color:var(--amber)':'color:var(--green)'))},[diff===null?'—':((diff>0?'+':'')+Math.round(diff)+'%')]),
+        el('td',{},[el('button',{class:'small ghost',type:'button',onclick:function(){ pricing.comps=pricing.comps.filter(function(y){return y.id!==x.id;}); savePricing(); render(); }},['✕'])])
+      ]));
+    });
+    tbl.appendChild(tb);
+    panel.appendChild(el('div',{class:'table-scroll'},[tbl]));
+    panel.appendChild(pNote('vs your price: red = you are more than 10% above them, amber = more than 10% below (you may be leaving money on the table), green = close.'));
+  }
+
+  function renderPricingRules(panel){
+    panel.appendChild(el('div',{class:'section-title'},['Unit rules']));
+    panel.appendChild(pNote('Leave a % box empty to use the default shown. Base is your normal weekday nightly price; if empty, the competitor average or your own 90-day average is used. Minimum should cover at least your turnover cost plus channel fees.'));
+    props.forEach(function(p){
+      var raw=pricing.settings[p.id]||{}, s=pSettings(p.id), h=histStats(p.id,90), c=compAvg(p.id);
+      var box=pCard([]);
+      box.appendChild(el('div',{style:'display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px'},[
+        el('div',{style:'font-weight:600;font-size:14px'},[propShort(p.id)+(p.type?' · '+p.type:'')]),
+        el('div',{style:'font-size:12px;color:var(--ink-soft)'},['90-day avg '+(h.adr?fmt(h.adr):'—')+' · comps '+(c.avg?fmt(c.avg):'—')])
+      ]));
+      var grid=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap'});
+      function f(label,key,ph){ grid.appendChild(pField(label,numInput(raw[key],ph,function(v){setSetting(p.id,key,v);}))); }
+      f('Base ₱/night','base','e.g. 1800');
+      f('Minimum ₱','min','floor');
+      f('Maximum ₱','max','cap');
+      f('Weekend +%','weekendPct',String(PRICING_DEFAULTS.weekendPct));
+      f('Target occupancy %','targetOcc',String(PRICING_DEFAULTS.targetOcc));
+      f('Last-minute (days)','lastMinuteDays',String(PRICING_DEFAULTS.lastMinuteDays));
+      f('Last-minute −%','lastMinutePct',String(PRICING_DEFAULTS.lastMinutePct));
+      f('Gap night −%','orphanPct',String(PRICING_DEFAULTS.orphanPct));
+      f('Pace step %','paceStepPct',String(PRICING_DEFAULTS.paceStepPct));
+      f('Far-out +%','farOutPct',String(PRICING_DEFAULTS.farOutPct));
+      box.appendChild(grid);
+      var chRow=el('div',{style:'display:flex;gap:16px;margin-top:10px;font-size:13px;align-items:center;flex-wrap:wrap'},[el('span',{style:'font-size:11px;color:var(--ink-soft)'},['Listed on'])]);
+      CHANNELS.forEach(function(ch){
+        var cb=el('input',{type:'checkbox'}); cb.checked=!!s.channels[ch[0]];
+        cb.addEventListener('change',function(){ var chs=Object.assign({},s.channels); chs[ch[0]]=cb.checked; setSetting(p.id,'channels',chs); render(); });
+        chRow.appendChild(el('label',{style:'display:flex;gap:6px;align-items:center'},[cb,ch[1]]));
+      });
+      box.appendChild(chRow);
+      panel.appendChild(box);
+    });
+    if(props.length>1) panel.appendChild(el('button',{class:'ghost small',type:'button',style:'margin-bottom:24px',onclick:function(){
+      var src=pricing.settings[pricingProp]||{};
+      if(!confirm('Copy the % rules (not base/min/max) from '+propShort(pricingProp)+' to all other units?')) return;
+      pushUndoSnapshot();
+      props.forEach(function(p){ if(p.id===pricingProp) return; pricing.settings[p.id]=pricing.settings[p.id]||{};
+        ['weekendPct','targetOcc','lastMinuteDays','lastMinutePct','orphanPct','paceStepPct','farOutPct'].forEach(function(k){ pricing.settings[p.id][k]=src[k]; }); });
+      savePricing(); render();
+    }},['Copy % rules from '+propShort(pricingProp)+' to all units']));
+
+    panel.appendChild(el('div',{class:'section-title',style:'margin-top:16px'},['Events & seasons']));
+    panel.appendChild(pNote('Applied to every unit on the nights covered. The starter list is a guess to get you going — check the official dates each year (e.g. Sinulog, Holy Week) and set % from what you see competitors doing.'));
+    var form=el('form',{class:'row'});
+    var nI=el('input',{type:'text',placeholder:'e.g. Sinulog'}), sI=el('input',{type:'date'}), eI=el('input',{type:'date'}), pI=el('input',{type:'number',inputmode:'decimal',placeholder:'+30 or -10'});
+    [pField('Name',nI),pField('First night',sI),pField('Last night',eI),pField('Adjust %',pI)].forEach(function(x){form.appendChild(x);});
+    form.appendChild(el('button',{type:'submit'},['Add event']));
+    form.addEventListener('submit',function(e){
+      e.preventDefault();
+      if(!nI.value.trim()||!sI.value||!eI.value||pI.value===''){ alert('Fill in name, dates and %.'); return; }
+      if(eI.value<sI.value){ alert('Last night is before the first night.'); return; }
+      pricing.events.push({id:uid(),name:nI.value.trim(),start:sI.value,end:eI.value,pct:Number(pI.value)});
+      savePricing(); render();
+    });
+    panel.appendChild(form);
+    var evs=pricing.events.slice().sort(function(a,b){return a.start.localeCompare(b.start);});
+    if(!evs.length){ panel.appendChild(el('div',{class:'empty'},['No events yet.'])); return; }
+    var tbl=el('table');
+    tbl.appendChild(el('thead',{},[el('tr',{},[el('th',{},['Event']),el('th',{},['First night']),el('th',{},['Last night']),el('th',{},['Adjust %']),el('th',{},[''])])]));
+    var tb=el('tbody');
+    evs.forEach(function(ev){
+      var past=ev.end<today();
+      var pctI=numInput(ev.pct,'',function(v){ ev.pct=Number(v)||0; savePricing(); render(); },'80px');
+      var sDI=el('input',{type:'date',value:ev.start}); sDI.addEventListener('change',function(){ if(sDI.value){ ev.start=sDI.value; savePricing(); render(); } });
+      var eDI=el('input',{type:'date',value:ev.end}); eDI.addEventListener('change',function(){ if(eDI.value){ ev.end=eDI.value; savePricing(); render(); } });
+      tb.appendChild(el('tr',{style:past?'opacity:.5':''},[
+        el('td',{},[ev.name]), el('td',{},[sDI]), el('td',{},[eDI]), el('td',{},[pctI]),
+        el('td',{},[el('button',{class:'small ghost',type:'button',onclick:function(){ if(!confirm('Delete '+ev.name+'?')) return; pricing.events=pricing.events.filter(function(x){return x.id!==ev.id;}); savePricing(); render(); }},['✕'])])
+      ]));
+    });
+    tbl.appendChild(tb);
+    panel.appendChild(el('div',{class:'table-scroll'},[tbl]));
+  }
+
+  function renderPricingInsights(panel){
+    var t=today();
+    panel.appendChild(pNote('Last 90 days, from the bookings in this dashboard (by check-in date). Revenue is net payout. Use this to spot units that need a lower base, better photos, or a shorter minimum stay.'));
+    var tbl=el('table');
+    tbl.appendChild(el('thead',{},[el('tr',{},[el('th',{},['Unit']),el('th',{},['Occupancy']),el('th',{},['Avg / night']),el('th',{},['Revenue']),el('th',{},['Avg stay']),el('th',{},['Channels']),el('th',{},['Open next 30']),el('th',{},['Gap nights next 30']),el('th',{},['Hint'])])]));
+    var tb=el('tbody');
+    var rows=props.map(function(p){
+      var h=histStats(p.id,90), open=0, gaps=0;
+      for(var i=0;i<30;i++){ var d=addDays(t,i); if(!bookedOn(p.id,d)){ open++; var g=gapAround(p.id,d); if(g.boxed&&g.len<=2) gaps++; } }
+      return {p:p,h:h,open:open,gaps:gaps};
+    }).sort(function(a,b){return a.h.occ-b.h.occ;});
+    var portfolioAdr=(function(){ var n=0,r=0; rows.forEach(function(x){n+=x.h.nights;r+=x.h.rev;}); return n?r/n:0; })();
+    rows.forEach(function(x){
+      var s=pSettings(x.p.id), hint='';
+      if(x.h.occ<s.targetOcc-20 && x.open>18) hint='Slow — try a lower base or refresh photos/title';
+      else if(x.h.occ>=Math.min(95,s.targetOcc+15)) hint='Busy — room to raise prices';
+      else if(x.gaps>=2) hint='Gaps — allow 1-night stays on those dates';
+      var chText=Object.keys(x.h.channels).map(function(c){return c+' '+Math.round(x.h.channels[c]/x.h.stays*100)+'%';}).join(', ');
+      tb.appendChild(el('tr',{},[
+        el('td',{style:'white-space:nowrap'},[el('a',{href:'#',onclick:function(e){e.preventDefault();pricingProp=x.p.id;pricingView='calendar';render();}},[propShort(x.p.id)])]),
+        el('td',{class:'mono',style:x.h.occ<s.targetOcc-20?'color:var(--rust)':''},[Math.round(x.h.occ)+'%']),
+        el('td',{class:'mono'},[x.h.adr?fmt(x.h.adr):'—']),
+        el('td',{class:'mono'},[fmt(x.h.rev)]),
+        el('td',{class:'mono'},[x.h.avgStay?x.h.avgStay.toFixed(1)+' n':'—']),
+        el('td',{style:'font-size:12px'},[chText||'—']),
+        el('td',{class:'mono'},[String(x.open)]),
+        el('td',{class:'mono',style:x.gaps?'color:var(--amber)':''},[String(x.gaps)]),
+        el('td',{style:'font-size:12px;color:var(--ink-soft)'},[hint])
+      ]));
+    });
+    tbl.appendChild(tb);
+    panel.appendChild(el('div',{class:'table-scroll'},[tbl]));
+    panel.appendChild(el('div',{style:'font-size:12px;color:var(--ink-soft);margin:8px 0 24px'},['Portfolio average per night (90 days): '+(portfolioAdr?fmt(portfolioAdr):'—')]));
+
+    // weekday occupancy, portfolio-wide, last 90 days
+    panel.appendChild(el('div',{class:'section-title'},['How booked each weekday is (last 90 days, all units)']));
+    var names=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'], tot=[0,0,0,0,0,0,0], bk=[0,0,0,0,0,0,0];
+    for(var i=1;i<=90;i++){
+      var d=addDays(t,-i), dow=new Date(d+'T00:00:00').getDay();
+      props.forEach(function(p){ tot[dow]++; if(bookedOn(p.id,d)) bk[dow]++; });
+    }
+    var bars=el('div',{style:'max-width:520px'});
+    names.forEach(function(n,k){
+      var pct=tot[k]?bk[k]/tot[k]*100:0;
+      bars.appendChild(el('div',{style:'display:flex;align-items:center;gap:10px;margin-bottom:6px'},[
+        el('div',{style:'width:36px;font-size:12px;color:var(--ink-soft)'},[n]),
+        el('div',{style:'flex:1;background:var(--line-soft);border-radius:4px;height:14px;overflow:hidden'},[el('div',{style:'height:100%;width:'+pct.toFixed(1)+'%;background:var(--accent);border-radius:4px'})]),
+        el('div',{class:'mono',style:'width:40px;text-align:right;font-size:12px'},[Math.round(pct)+'%'])
+      ]));
+    });
+    panel.appendChild(bars);
+    panel.appendChild(pNote('If weekdays are much emptier than weekends, lower weekday base slightly and raise Weekend +% instead of discounting every night.'));
+  }
+  // ================= end PRICING =================
+
   function render(){
+    _nightIdx=null;
     var root=document.getElementById('app');
     root.innerHTML='';
     if(!loaded){root.appendChild(el('div',{class:'empty'},['Loading\u2026']));return;}
@@ -2876,6 +3885,8 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     if(activeTab==='overview')renderOverview(panel);
     else if(activeTab==='properties')renderProperties(panel);
     else if(activeTab==='bookings')renderBookings(panel);
+    else if(activeTab==='pricing')renderPricing(panel);
+    else if(activeTab==='calsync')renderCalSync(panel);
     else if(activeTab==='expenses')renderExpenses(panel);
     else if(activeTab==='owner')renderOwnerReport(panel);
     else if(activeTab==='earnings')renderMyEarnings(panel);
