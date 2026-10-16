@@ -174,19 +174,21 @@
       wrap.appendChild(el('div',{style:'font-weight:500;font-size:14px;margin-bottom:6px'},['Who stayed — '+(data.month||'')]));
       var tbl=el('table');
       tbl.appendChild(el('thead',{},[el('tr',{},[
-        el('th',{},['Property']),el('th',{},['Guest']),el('th',{},['Check-in']),el('th',{},['Check-out']),el('th',{},['Nights']),el('th',{},['Via']),el('th',{},['Amount'])
+        el('th',{},['Property']),el('th',{},['Guest']),el('th',{},['Check-in']),el('th',{},['Check-out']),el('th',{},['Nights']),el('th',{},['Pax']),el('th',{},['Via']),el('th',{},['Total payment']),el('th',{},['Paid']),el('th',{},['Balance'])
       ])]));
       var tb=el('tbody');
       data.reservations.forEach(function(res){
         tb.appendChild(el('tr',{},[
           el('td',{},[res.property||'']), el('td',{},[res.guest||'']),
           el('td',{class:'mono'},[res.checkIn||'']), el('td',{class:'mono'},[res.checkOut||'']),
-          el('td',{class:'mono'},[String(res.nights||'')]), el('td',{},[res.channel||'']),
-          el('td',{class:'mono'},[fmt(res.amount)])
+          el('td',{class:'mono'},[String(res.nights||'')]), el('td',{class:'mono'},[res.pax?String(res.pax):'\u2014']), el('td',{},[res.channel||'']),
+          el('td',{class:'mono'},[fmt(res.amount)]),
+          el('td',{class:'mono'},[fmt(res.paid!==undefined?res.paid:res.amount)]),
+          el('td',{class:'mono'},[res.due?fmt(res.due):'\u2014'])
         ]));
       });
       tbl.appendChild(tb);
-      wrap.appendChild(tbl);
+      wrap.appendChild(el('div',{style:'overflow-x:auto;-webkit-overflow-scrolling:touch'},[tbl]));
     }
 
     wrap.appendChild(el('button',{class:'ghost',style:'margin-top:20px',onclick:function(){ window.print(); }},['Print / Save as PDF']));
