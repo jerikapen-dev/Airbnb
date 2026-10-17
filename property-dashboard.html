@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<title>Portfolio dashboard</title>
+<title>MJP Property Management</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#3E6259">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Dashboard">
+<meta name="apple-mobile-web-app-title" content="MJP Property">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 :root{
@@ -28,7 +28,7 @@
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
 body{background:var(--paper)}
-#app{font-family:'Inter',sans-serif;background:var(--paper);color:var(--ink);min-height:100vh;max-width:1040px;margin:0 auto}
+#app{font-family:'Inter',sans-serif;background:var(--paper);color:var(--ink);min-height:100vh;max-width:1280px;margin:0 auto}
 .mono{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
 .disp{font-family:'Fraunces',serif}
 #app a{color:var(--accent);text-decoration-color:var(--line);text-underline-offset:3px}
@@ -37,6 +37,8 @@ body{background:var(--paper)}
 .brand{display:flex;flex-direction:column}
 .eyebrow{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);font-weight:500;margin:0 0 4px}
 .topbar h1{font-family:'Fraunces',serif;font-weight:500;font-size:24px;margin:0;letter-spacing:-.01em}
+.brandmark{font-size:28px !important;font-weight:600 !important;letter-spacing:-.02em}
+.brandmark .hash{color:var(--accent)}
 .topbar p{margin:4px 0 0;color:var(--ink-soft);font-size:13px}
 
 .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:0;padding:4px 28px 24px;border-bottom:1px solid var(--line)}
@@ -92,6 +94,86 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   .metrics{grid-template-columns:1fr 1fr}
   .topbar{flex-direction:column;align-items:flex-start}
   .topbar button{width:100%}
+}
+
+/* ---- layout polish ---- */
+#app{max-width:1280px}
+.tabs{gap:0;align-items:stretch}
+.tab-group{display:flex;align-items:stretch;gap:18px;padding-right:18px;margin-right:18px;border-right:1px solid var(--line)}
+.tab-group:last-child{border-right:none}
+.tab-glabel{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);align-self:center;opacity:.8;white-space:nowrap}
+.page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin:0 0 16px}
+.page-title{font-family:'Fraunces',serif;font-weight:500;font-size:22px;margin:0;letter-spacing:-.01em}
+.page-sub{font-size:12.5px;color:var(--ink-soft);margin-top:2px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
+.kpi{background:var(--paper-raised);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+.kpi-l{font-size:11px;color:var(--ink-soft);letter-spacing:.02em}
+.kpi-v{font-size:21px;font-weight:500;margin-top:4px;letter-spacing:-.01em}
+.kpi-s{font-size:11px;color:var(--ink-soft);margin-top:2px}
+.seg{display:inline-flex;background:var(--line-soft);border:1px solid var(--line);border-radius:8px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg-b{background:transparent;border:none;color:var(--ink-soft);font-size:13px;padding:7px 14px;min-height:34px;border-radius:6px;font-weight:500}
+.seg-b:hover{opacity:1;color:var(--ink)}
+.seg-b.on{background:var(--paper-raised);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.subnav{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.tb-group{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-soft);margin:4px 0 10px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.lg{display:inline-block;width:14px;height:12px;border-radius:3px;border:1px solid var(--line)}
+.lg-open{background:#fff}.lg-manual{background:#fff;border:1.5px solid var(--accent)}
+.lg-booked{background:var(--accent);border-color:var(--accent)}
+.lg-blocked{background:repeating-linear-gradient(45deg,#E4E3DE 0 3px,#F3F2EF 3px 6px)}
+.lg-event{background:#fff;box-shadow:inset 0 -3px 0 var(--amber)}
+.lg-behind{background:#fff;position:relative}
+.lg-behind:after{content:'';position:absolute;top:1px;right:1px;width:5px;height:5px;border-radius:50%;background:var(--rust)}
+.mc-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper-raised)}
+table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-size:12px}
+.mc th,.mc td{padding:0;border-bottom:1px solid var(--line-soft)}
+.mc .mc-unit{position:sticky;left:0;z-index:2;background:var(--paper-raised);min-width:150px;max-width:170px;padding:8px 12px;border-right:1px solid var(--line);text-align:left}
+.mc thead th{background:var(--paper);font-weight:500;color:var(--ink-soft)}
+.mc thead .mc-unit{background:var(--paper);z-index:3}
+.mc-month th{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;text-align:left;padding:7px 8px;border-left:1px solid var(--line)}
+.mc-days th{text-align:center;padding:5px 0;min-width:56px;width:56px}
+.mc-days th.we{background:#F3F2EF}
+.mc-days th.today .dn{background:var(--ink);color:#fff;border-radius:10px;padding:0 6px}
+.mc-days th.ev{box-shadow:inset 0 -3px 0 var(--amber)}
+.mc-days .dw{font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+.mc-days .dn{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--ink);display:inline-block;margin-top:1px}
+.mc-name{font-weight:600;color:var(--ink);text-decoration:none;font-size:13px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mc-meta{font-size:10.5px;color:var(--ink-soft);margin-top:2px;white-space:nowrap}
+.mc-c{height:46px;min-width:56px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px;cursor:pointer;position:relative;border-left:1px solid var(--line-soft);transition:background .1s}
+.c-we{background:#FAF9F6}
+.c-open:hover{background:var(--accent-l)}
+.c-manual{box-shadow:inset 0 0 0 1.5px var(--accent);font-weight:600;color:var(--teal-dark)}
+.c-event{box-shadow:inset 0 -3px 0 var(--amber)}
+.c-manual.c-event{box-shadow:inset 0 0 0 1.5px var(--accent),inset 0 -4px 0 var(--amber)}
+.c-behind:after{content:'';position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:var(--rust)}
+.c-booked{background:var(--accent);color:#fff;font-family:'Inter',sans-serif;font-size:11px;text-align:left;padding-left:6px;border-left-color:var(--accent);white-space:nowrap;overflow:visible}
+.c-booked.c-start{border-left:3px solid var(--teal-dark)}
+.c-blocked{background:repeating-linear-gradient(45deg,#E4E3DE 0 4px,#F3F2EF 4px 8px)}
+.c-sel{outline:2px solid var(--ink);outline-offset:-2px;z-index:1}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:360px;max-width:100vw;background:var(--paper-raised);border-left:1px solid var(--line);box-shadow:-12px 0 32px rgba(0,0,0,.08);z-index:50;display:flex;flex-direction:column;font-family:'Inter',sans-serif;color:var(--ink)}
+.dr-head{display:flex;justify-content:space-between;align-items:flex-start;padding:20px 20px 12px;border-bottom:1px solid var(--line)}
+.dr-eyebrow{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft)}
+.dr-title{font-family:'Fraunces',serif;font-size:19px;font-weight:500;margin-top:2px}
+.dr-body{padding:16px 20px 40px;overflow-y:auto;flex:1}
+.dr-status{display:inline-block;font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;margin-bottom:12px}
+.st-booked{background:var(--accent-l);color:var(--accent)}.st-blocked{background:var(--line-soft);color:var(--ink-soft)}
+.dr-row{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:8px 0;border-bottom:1px solid var(--line-soft)}
+.dr-row span:first-child{color:var(--ink-soft)}
+.dr-price{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px}
+.dr-l{font-size:11px;color:var(--ink-soft)}
+.dr-big{font-size:30px;font-weight:500;letter-spacing:-.02em}
+.dr-sec{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);margin:18px 0 8px}
+.dr-break{border:1px solid var(--line);border-radius:var(--radius-sm)}
+.dr-br{font-size:12.5px;padding:7px 10px;border-top:1px solid var(--line-soft)}
+.dr-br.first{border-top:none;font-weight:500}
+.dr-note{font-size:12px;color:var(--ink-soft);margin-top:10px}
+@media (max-width:820px){
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .tab-group{gap:14px;padding-right:14px;margin-right:14px}
+  .drawer{top:auto;width:100%;height:78vh;border-left:none;border-top:1px solid var(--line);border-radius:16px 16px 0 0}
+  .mc .mc-unit{min-width:110px;max-width:120px;padding:6px 8px}
 }
 @media print{
   body{background:#fff}
@@ -198,7 +280,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       }
     }));
     app.innerHTML='';
-    app.appendChild(gateShell('Connect your dashboard','One-time setup, per device. Paste the config object from your Firebase project (Project settings \u2192 General \u2192 Your apps \u2192 SDK setup and configuration).',body));
+    app.appendChild(gateShell('MJP Property Management \u2014 connect this device','One-time setup, per device. Paste the config object from your Firebase project (Project settings \u2192 General \u2192 Your apps \u2192 SDK setup and configuration).',body));
   }
 
   function renderAuthGate(auth){
@@ -245,7 +327,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     body.appendChild(signInBtn); body.appendChild(signUpBtn); body.appendChild(errBox);
     body.appendChild(forgotBtn); body.appendChild(forgotStatus);
     app.innerHTML='';
-    app.appendChild(gateShell('Sign in','Use the same email and password on every device to see the same data everywhere. If you already created an account on another device, use "Sign in" here — do not press "Create account" again, or you’ll start a second, empty account. Not sure which email you used the first time? Check the Account section on your original, working device — it now shows the exact email that device is signed in with.',body));
+    app.appendChild(gateShell('Sign in to MJP Property Management','Use the same email and password on every device to see the same data everywhere. If you already created an account on another device, use "Sign in" here — do not press "Create account" again, or you’ll start a second, empty account. Not sure which email you used the first time? Check the Account section on your original, working device — it now shows the exact email that device is signed in with.',body));
   }
 
   function startFirestoreSync(db,uid){
@@ -876,7 +958,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     var acctBtn=el('button',{class:'ghost small',type:'button',title:(currentUser&&currentUser.email)?('Signed in as '+currentUser.email+' \u2014 click to switch account'):'',onclick:function(){activeTab='backup';render();}},[(currentUser&&currentUser.email)?currentUser.email:'Account']);
     root.appendChild(el('div',{class:'topbar'},[
       el('div',{class:'brand'},[
-        el('div',{class:'eyebrow'},['Property Operations']),el('h1',{},['Portfolio dashboard']),el('p',{},[t.total+' properties tracked \u00b7 '+t.occ+' occupied today'])
+        el('div',{class:'eyebrow'},['Owner & guest operations']),el('h1',{class:'brandmark'},[el('span',{class:'hash'},['MJP']),' Property Management']),el('p',{},[t.total+' properties tracked \u00b7 '+t.occ+' occupied today'])
       ]),
       el('div',{style:'display:flex;gap:8px;align-items:center'},[acctBtn,undoBtn,redoBtn,el('button',{onclick:function(){activeTab='properties';render();}},['Manage properties'])])
     ]));
@@ -889,10 +971,18 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   }
 
   function renderTabs(root){
-    var tabs=[['overview','Overview'],['properties','Properties'],['bookings','Bookings'],['pricing','Pricing'],['calsync','Calendar sync'],['expenses','Expenses'],['owner','Owner report'],['earnings','My earnings'],['cleaning','Cleaning schedule'],['maintenance','Maintenance'],['backup','Backup']];
+    var groups=[
+      ['Operate',[['overview','Overview'],['bookings','Bookings'],['calsync','Calendar sync'],['cleaning','Cleaning'],['maintenance','Maintenance']]],
+      ['Revenue',[['pricing','Pricing'],['expenses','Expenses'],['owner','Owner report'],['earnings','My earnings']]],
+      ['Setup',[['properties','Properties'],['backup','Backup']]]
+    ];
     var bar=el('div',{class:'tabs'});
-    tabs.forEach(function(tb){
-      bar.appendChild(el('div',{class:'tab'+(activeTab===tb[0]?' active':''),onclick:function(){activeTab=tb[0];render();}},[tb[1]]));
+    groups.forEach(function(g){
+      var grp=el('div',{class:'tab-group'},[el('span',{class:'tab-glabel'},[g[0]])]);
+      g[1].forEach(function(tb){
+        grp.appendChild(el('div',{class:'tab'+(activeTab===tb[0]?' active':''),onclick:function(){activeTab=tb[0];mcSel=null;render();}},[tb[1]]));
+      });
+      bar.appendChild(grp);
     });
     root.appendChild(bar);
   }
@@ -935,11 +1025,13 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       var attnBox=el('div',{style:'background:var(--amber-l);border:1px solid var(--amber);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px'});
       attnBox.appendChild(el('div',{style:'font-weight:600;color:var(--amber);font-size:13px;margin-bottom:6px'},['Needs attention ('+attentionItems.length+')']));
       var toneColors={amber:'var(--amber)', rust:'var(--rust)'};
-      attentionItems.forEach(function(it){
+      var showAll=window.__attnAll||attentionItems.length<=7;
+      attentionItems.slice(0,showAll?attentionItems.length:6).forEach(function(it){
         attnBox.appendChild(el('div',{style:'font-size:12px;color:var(--ink);padding:2px 0'},[
           el('span',{class:'dot',style:'background:'+(toneColors[it.tone]||'var(--amber)')}), it.text
         ]));
       });
+      if(attentionItems.length>7) attnBox.appendChild(el('button',{type:'button',class:'small ghost',style:'margin-top:8px',onclick:function(){ window.__attnAll=!window.__attnAll; render(); }},[showAll?'Show less':'Show all '+attentionItems.length]));
       panel.appendChild(attnBox);
     }
 
@@ -3721,7 +3813,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
 
   // ================= PRICING: rate suggestions, comps, channel update tracking =================
   var pricing={settings:{},events:[],comps:[],overrides:{},applied:{},seeded:false};
-  var pricingView='calendar', pricingProp=null, pricingDays=30, pricingCompProp=null;
+  var pricingView='multi', pricingProp=null, pricingDays=30, pricingCompProp=null;
   var PRICING_DEFAULTS={weekendPct:15,targetOcc:70,lastMinuteDays:3,lastMinutePct:15,orphanPct:15,farOutDays:60,farOutPct:5,paceWindow:45,paceStepPct:10,roundTo:50};
   var CHANNELS=[['airbnb','Airbnb'],['booking','Booking.com']];
 
@@ -3902,20 +3994,244 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
   }
   function pField(label,input){ return el('div',{class:'field',style:'display:flex;flex-direction:column;gap:5px;flex:1 1 120px;min-width:110px'},[el('label',{style:'font-size:11px;color:var(--ink-soft)'},[label]),input]); }
 
+  // ================= PRICING WORKSPACE (PriceLabs-style) =================
+  var mcStart=null, mcDays=30, mcSel=null, mcFilter='', mcBulk=false;
+
+  function shortMoney(n){ n=Math.round(n||0); return n>=10000?(Math.round(n/100)/10)+'k':n.toLocaleString(); }
+
+  function portfolioKpis(days){
+    var t=today(), nights=0, booked=0, openPriceSum=0, openCount=0, bookedRev=0, pend=0;
+    props.forEach(function(p){
+      for(var i=0;i<days;i++){
+        var d=addDays(t,i), bk=bookedOn(p.id,d); nights++;
+        if(bk){ booked++; if(!bk.fromCal){ var n=Math.max(1,daysBetween(bk.checkIn,bk.checkOut)); bookedRev+=Number(bk.amount||0)/n; } }
+        else { var fp=finalPrice(p.id,d).price; if(fp){ openPriceSum+=fp; openCount++; } }
+      }
+      pend+=pendingUpdates(p.id,days);
+    });
+    return {occ:nights?booked/nights*100:0, open:nights-booked, avgOpen:openCount?openPriceSum/openCount:0, bookedRev:bookedRev, pend:pend};
+  }
+
+  function kpiStrip(panel,items){
+    var g=el('div',{class:'kpis'});
+    items.forEach(function(it){
+      g.appendChild(el('div',{class:'kpi'},[
+        el('div',{class:'kpi-l'},[it[0]]),
+        el('div',{class:'kpi-v mono',style:it[2]||''},[it[1]]),
+        it[3]?el('div',{class:'kpi-s'},[it[3]]):null
+      ]));
+    });
+    panel.appendChild(g);
+  }
+
+  function segControl(opts,cur,onpick){
+    var w=el('div',{class:'seg'});
+    opts.forEach(function(o){ w.appendChild(el('button',{type:'button',class:'seg-b'+(cur===o[0]?' on':''),onclick:function(){onpick(o[0]);}},[o[1]])); });
+    return w;
+  }
+
+  function cellState(pid,d){
+    var bk=bookedOn(pid,d);
+    if(bk && bk.blockId) return {kind:'blocked',bk:bk};
+    if(bk && bk.fromCal && bk.kind!=='reserved') return {kind:'blocked',bk:bk};
+    if(bk) return {kind:'booked',bk:bk};
+    var fp=finalPrice(pid,d), s=pSettings(pid);
+    var behind=fp.price && CHANNELS.some(function(c){ return s.channels[c[0]] && !channelState(pid,d,c[0],fp.price).done; });
+    return {kind:'open',price:fp.price,manual:fp.manual,behind:behind,event:eventsOn(d).length>0};
+  }
+
+  function renderMultiCalendar(panel){
+    var t=today();
+    if(!mcStart || mcStart<t) mcStart=t;
+    // toolbar
+    var tb=el('div',{class:'toolbar'});
+    var left=el('div',{class:'tb-group'},[
+      el('button',{type:'button',class:'small ghost',onclick:function(){ mcStart=addDays(mcStart,-mcDays); if(mcStart<t) mcStart=t; render(); }},['‹']),
+      el('button',{type:'button',class:'small ghost',onclick:function(){ mcStart=t; render(); }},['Today']),
+      el('button',{type:'button',class:'small ghost',onclick:function(){ mcStart=addDays(mcStart,mcDays); render(); }},['›']),
+      segControl([[14,'2W'],[30,'1M'],[60,'2M'],[90,'3M'],[180,'6M']],mcDays,function(v){mcDays=v;render();})
+    ]);
+    var search=el('input',{type:'search',placeholder:'Filter units',value:mcFilter,style:'min-height:36px;font-size:14px;padding:6px 10px;width:160px'});
+    search.addEventListener('input',function(){ mcFilter=search.value; clearTimeout(search._t); search._t=setTimeout(render,250); });
+    var right=el('div',{class:'tb-group'},[
+      search,
+      el('button',{type:'button',class:mcBulk?'small':'small ghost',onclick:function(){ mcBulk=!mcBulk; if(mcBulk){ bulkOpen=true; bulkState=bulkState||null; } render(); }},['Bulk edit']),
+      el('button',{type:'button',class:'small ghost',onclick:function(){
+        var rows=[['Unit','Date','Day','Status','Final price','Suggested','My price']];
+        visibleProps().forEach(function(p){ for(var i=0;i<mcDays;i++){ var d=addDays(mcStart,i), cs=cellState(p.id,d); rows.push([propShort(p.id),d,weekdayShort(d),cs.kind,cs.kind==='open'?cs.price:'',cs.kind==='open'?suggestPrice(p.id,d).price:'',pricing.overrides[pKey(p.id,d)]||'']); } });
+        pricingCSV('portfolio-rates-'+mcStart+'.csv',rows);
+      }},['Export'])
+    ]);
+    tb.appendChild(left); tb.appendChild(right);
+    panel.appendChild(tb);
+
+    if(mcBulk){
+      var holder=el('div',{});
+      if(bulkState) bulkState.scope=bulkState.scope||'all'; else { bulkState={from:mcStart,to:addDays(mcStart,mcDays-1),days:[0,1,2,3,4,5,6],scope:'all',action:'fixed',value:''}; }
+      renderBulkEdit(holder,pricingProp);
+      panel.appendChild(holder);
+    }
+
+    // legend
+    panel.appendChild(el('div',{class:'legend'},[
+      el('span',{},[el('i',{class:'lg lg-open'}),'Open — price']),
+      el('span',{},[el('i',{class:'lg lg-manual'}),'Your price']),
+      el('span',{},[el('i',{class:'lg lg-booked'}),'Booked']),
+      el('span',{},[el('i',{class:'lg lg-blocked'}),'Blocked']),
+      el('span',{},[el('i',{class:'lg lg-event'}),'Event / holiday']),
+      el('span',{},[el('i',{class:'lg lg-behind'}),'Not yet updated on a channel'])
+    ]));
+
+    var dates=[]; for(var i=0;i<mcDays;i++) dates.push(addDays(mcStart,i));
+    var wrap=el('div',{class:'mc-wrap'});
+    var tbl=el('table',{class:'mc'});
+    // month row + day row
+    var mRow=el('tr',{class:'mc-month'},[el('th',{class:'mc-unit'},[''])]);
+    var lastM='', span=0, mCell=null;
+    dates.forEach(function(d){
+      var mk=d.slice(0,7);
+      if(mk!==lastM){ lastM=mk; mCell=el('th',{colspan:'1'},[new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric'})]); mRow.appendChild(mCell); span=1; }
+      else { span++; mCell.setAttribute('colspan',String(span)); }
+    });
+    var dRow=el('tr',{class:'mc-days'},[el('th',{class:'mc-unit'},['Unit'])]);
+    dates.forEach(function(d){
+      var dow=new Date(d+'T00:00:00').getDay(), ev=eventsOn(d);
+      dRow.appendChild(el('th',{class:(dow===5||dow===6?'we ':'')+(d===t?'today ':'')+(ev.length?'ev':''),title:ev.length?ev.map(function(e){return e.name;}).join(', '):''},[
+        el('div',{class:'dw'},[weekdayShort(d).slice(0,2)]), el('div',{class:'dn'},[String(Number(d.slice(8)))])
+      ]));
+    });
+    tbl.appendChild(el('thead',{},[mRow,dRow]));
+    var tb2=el('tbody');
+    visibleProps().forEach(function(p){
+      var s=pSettings(p.id), base=resolveBase(p.id), occ=0;
+      for(var j=0;j<30;j++){ if(bookedOn(p.id,addDays(t,j))) occ++; }
+      var unitCell=el('td',{class:'mc-unit'},[
+        el('a',{href:'#',class:'mc-name',onclick:function(e){e.preventDefault(); pricingProp=p.id; pricingView='calendar'; render();}},[propShort(p.id)]),
+        el('div',{class:'mc-meta'},[(base.value?'Base '+fmt(base.value):'No base')+' · '+Math.round(occ/30*100)+'% booked'])
+      ]);
+      var tr=el('tr',{},[unitCell]);
+      var prevBk=null;
+      dates.forEach(function(d){
+        var cs=cellState(p.id,d), cls='c-'+cs.kind, txt='';
+        if(cs.kind==='booked'){
+          var start=(cs.bk!==prevBk);
+          cls+=start?' c-start':'';
+          txt=start?((cs.bk.guest||'').split(' ')[0]||'●').slice(0,9):'';
+          prevBk=cs.bk;
+        } else {
+          prevBk=null;
+          if(cs.kind==='blocked') txt='';
+          else { txt=cs.price?shortMoney(cs.price):'—'; if(cs.manual) cls+=' c-manual'; if(cs.event) cls+=' c-event'; if(cs.behind) cls+=' c-behind'; }
+        }
+        var dw=new Date(d+'T00:00:00').getDay(); if(cs.kind==='open' && (dw===5||dw===6)) cls+=' c-we';
+        if(mcSel && mcSel.pid===p.id && mcSel.d===d) cls+=' c-sel';
+        var td=el('td',{class:'mc-c '+cls,onclick:function(){ mcSel={pid:p.id,d:d}; render(); }},[txt]);
+        tr.appendChild(td);
+      });
+      tb2.appendChild(tr);
+    });
+    tbl.appendChild(tb2);
+    wrap.appendChild(tbl);
+    panel.appendChild(wrap);
+    if(!visibleProps().length) panel.appendChild(el('div',{class:'empty'},['No units match “'+mcFilter+'”.']));
+    if(mcSel) renderNightDrawer(mcSel.pid,mcSel.d);
+  }
+  function visibleProps(){
+    var q=(mcFilter||'').trim().toLowerCase();
+    return props.filter(function(p){ return !q || propAllNames(p).some(function(n){return n.indexOf(q)>-1;}); });
+  }
+
+  function renderNightDrawer(pid,d){
+    var old=document.getElementById('night-drawer'); if(old) old.remove();
+    var cs=cellState(pid,d), s=pSettings(pid);
+    var dr=el('div',{id:'night-drawer',class:'drawer'});
+    dr.appendChild(el('div',{class:'dr-head'},[
+      el('div',{},[
+        el('div',{class:'dr-eyebrow'},[propShort(pid)]),
+        el('div',{class:'dr-title'},[new Date(d+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})])
+      ]),
+      el('button',{type:'button',class:'small ghost',onclick:function(){ mcSel=null; dr.remove(); render(); }},['✕'])
+    ]));
+    var body=el('div',{class:'dr-body'});
+    if(cs.kind==='booked'){
+      var bk=cs.bk, n=Math.max(1,daysBetween(bk.checkIn,bk.checkOut));
+      body.appendChild(el('div',{class:'dr-status st-booked'},['Booked']));
+      body.appendChild(drRow('Guest',bk.guest||'—'));
+      body.appendChild(drRow('Channel',bk.channel||'—'));
+      body.appendChild(drRow('Stay',bk.checkIn+' → '+bk.checkOut+' ('+n+' night'+(n>1?'s':'')+')'));
+      if(!bk.fromCal) body.appendChild(drRow('Paid per night (net)',fmt(Number(bk.amount||0)/n)));
+      else body.appendChild(el('div',{class:'dr-note'},['From calendar sync — add it in Calendar sync to track the amount.']));
+    } else if(cs.kind==='blocked'){
+      body.appendChild(el('div',{class:'dr-status st-blocked'},['Blocked']));
+      body.appendChild(drRow('Reason',cs.bk.guest||'Blocked'));
+      if(cs.bk.blockId) body.appendChild(el('button',{type:'button',class:'ghost',style:'width:100%;margin-top:10px',onclick:function(){ removeBlock(cs.bk.blockId).then(function(){ render(); }); }},['Unblock']));
+    } else {
+      var sg=suggestPrice(pid,d), fp=finalPrice(pid,d), ov=pricing.overrides[pKey(pid,d)];
+      body.appendChild(el('div',{class:'dr-price'},[
+        el('div',{},[el('div',{class:'dr-l'},[ov?'Your price':'Price']),el('div',{class:'dr-big mono'},[fp.price?fmt(fp.price):'—'])]),
+        ov?el('div',{style:'text-align:right'},[el('div',{class:'dr-l'},['Suggested']),el('div',{class:'mono',style:'font-size:16px;color:var(--ink-soft)'},[sg.price?fmt(sg.price):'—'])]):null
+      ]));
+      // breakdown
+      var bd=el('div',{class:'dr-break'});
+      sg.reasons.forEach(function(r,i){ bd.appendChild(el('div',{class:'dr-br'+(i===0?' first':'')},[r])); });
+      body.appendChild(el('div',{class:'dr-sec'},['How the suggestion is built']));
+      body.appendChild(bd);
+      var mk=marketStats(pid);
+      if(mk.count) body.appendChild(drRow('Market middle (Claude)',fmt(mk.mid)+'  ·  '+fmt(mk.min)+'–'+fmt(mk.max).replace('₱','')));
+      // override
+      body.appendChild(el('div',{class:'dr-sec'},['Set your price']));
+      var inp=el('input',{type:'number',inputmode:'decimal',placeholder:sg.price?String(sg.price):'Price',style:'font-size:18px'});
+      if(ov) inp.value=ov;
+      var quick=el('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin:8px 0'});
+      [-10,-5,5,10].forEach(function(pc){
+        quick.appendChild(el('button',{type:'button',class:'small ghost',onclick:function(){ var b=Number(inp.value)||sg.price||0; inp.value=Math.round(b*(1+pc/100)/(s.roundTo||1))*(s.roundTo||1); }},[(pc>0?'+':'')+pc+'%']));
+      });
+      body.appendChild(inp); body.appendChild(quick);
+      body.appendChild(el('div',{style:'display:flex;gap:8px'},[
+        el('button',{type:'button',style:'flex:1',onclick:function(){ var v=Number(inp.value); pushUndoSnapshot(); if(v>0) pricing.overrides[pKey(pid,d)]=v; else delete pricing.overrides[pKey(pid,d)]; savePricing(); render(); }},['Save']),
+        ov?el('button',{type:'button',class:'ghost',style:'flex:1',onclick:function(){ pushUndoSnapshot(); delete pricing.overrides[pKey(pid,d)]; savePricing(); render(); }},['Use suggested']):null
+      ]));
+      // channels
+      body.appendChild(el('div',{class:'dr-sec'},['Updated on channels?']));
+      var chs=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap'});
+      CHANNELS.filter(function(c){return s.channels[c[0]];}).forEach(function(c){
+        var st=channelState(pid,d,c[0],fp.price);
+        chs.appendChild(el('button',{type:'button',class:'small '+(st.done?'':'ghost'),style:st.done?'background:var(--green);border-color:var(--green)':'',onclick:function(){ if(!fp.price) return; markApplied(pid,d,c[0],fp.price,!st.done); savePricing(); render(); }},[(st.done?'✓ ':'')+c[1]+(st.was&&!st.done?' (was '+fmt(st.was)+')':'')]));
+      });
+      body.appendChild(chs);
+      body.appendChild(el('button',{type:'button',class:'ghost',style:'width:100%;margin-top:16px',onclick:function(){ if(confirm('Block '+shortDate(d)+' for '+propShort(pid)+'?')) addBlock(pid,d,addDays(d,1),'').then(function(){ render(); }); }},['Block this night']));
+    }
+    dr.appendChild(body);
+    document.body.appendChild(dr);
+  }
+  function drRow(l,v){ return el('div',{class:'dr-row'},[el('span',{},[l]),el('span',{class:'mono'},[v])]); }
+
+  function renderPricingHeader(panel){
+    var k=portfolioKpis(30);
+    var hd=el('div',{class:'page-head'},[
+      el('div',{},[el('div',{class:'eyebrow'},['Revenue']),el('h2',{class:'page-title'},['Pricing']),el('div',{class:'page-sub'},['Next 30 nights across '+props.length+' unit'+(props.length===1?'':'s')])])
+    ]);
+    panel.appendChild(hd);
+    kpiStrip(panel,[
+      ['Occupancy, next 30',Math.round(k.occ)+'%','',k.open+' open nights'],
+      ['Avg price, open nights',k.avgOpen?fmt(k.avgOpen):'—','','what you’re asking'],
+      ['Booked revenue, next 30',fmt(k.bookedRev),'','net payouts on the books'],
+      ['Prices to update',String(k.pend),k.pend?'color:var(--rust)':'color:var(--green)',k.pend?'on Airbnb / Booking.com':'all channels up to date']
+    ]);
+  }
+  // ================= end PRICING WORKSPACE =================
+
   function renderPricing(panel){
     if(!pricing.seeded){ pricing.events=starterEvents().concat(pricing.events); pricing.seeded=true; prunePricingHistory(); savePricing(); }
     if(props.length===0){ panel.appendChild(el('div',{class:'empty'},['Add properties first, then pricing suggestions appear here.'])); return; }
     if(!pricingProp || !props.some(function(p){return p.id===pricingProp;})) pricingProp=props[0].id;
 
-    var views=[['calendar','Rate calendar'],['portfolio','All units'],['comps','Competitors'],['rules','Rules & events'],['insights','Insights']];
-    var bar=el('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px'});
-    views.forEach(function(v){
-      bar.appendChild(el('button',{type:'button',class:pricingView===v[0]?'small':'small ghost',onclick:function(){pricingView=v[0];render();}},[v[1]]));
-    });
-    panel.appendChild(bar);
+    renderPricingHeader(panel);
+    var views=[['multi','Multi-calendar'],['calendar','Unit calendar'],['comps','Market'],['rules','Rules & events'],['insights','Insights']];
+    panel.appendChild(el('div',{class:'subnav'},[segControl(views,pricingView==='portfolio'?'multi':pricingView,function(v){pricingView=v;mcSel=null;render();})]));
 
-    if(pricingView==='calendar') renderPricingCalendar(panel);
-    else if(pricingView==='portfolio') renderPricingPortfolio(panel);
+    if(pricingView==='multi' || pricingView==='portfolio') renderMultiCalendar(panel);
+    else if(pricingView==='calendar') renderPricingCalendar(panel);
     else if(pricingView==='comps') renderPricingComps(panel);
     else if(pricingView==='rules') renderPricingRules(panel);
     else renderPricingInsights(panel);
@@ -3928,10 +4244,113 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     return sel;
   }
 
+  var bulkState=null, bulkOpen=false;
+  function renderBulkEdit(panel,pid){
+    if(!bulkState) bulkState={from:today(),to:addDays(today(),13),days:[0,1,2,3,4,5,6],scope:'this',action:'fixed',value:''};
+    var st=bulkState;
+    var box=pCard([],'border-color:var(--accent)');
+    var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer',onclick:function(){bulkOpen=!bulkOpen;render();}},[
+      el('div',{},[el('div',{style:'font-weight:600;font-size:14px'},['Bulk edit prices']),el('div',{style:'font-size:12px;color:var(--ink-soft)'},['Set many nights at once — a fixed price, or the suggestion ± % / ₱'])]),
+      el('span',{style:'font-size:18px;color:var(--ink-soft)'},[bulkOpen?'−':'+'])
+    ]);
+    box.appendChild(head);
+    if(!bulkOpen){ panel.appendChild(box); return; }
+    var g=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'});
+    var fI=el('input',{type:'date',value:st.from}); fI.addEventListener('change',function(){st.from=fI.value||st.from;render();});
+    var tI=el('input',{type:'date',value:st.to}); tI.addEventListener('change',function(){st.to=tI.value||st.to;render();});
+    g.appendChild(pField('From night',fI)); g.appendChild(pField('To night',tI));
+    var qr=el('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin-top:8px'});
+    [['Next 2 weeks',13],['Next 30 days',29],['Next 3 months',90],['Next 6 months',182]].forEach(function(q){
+      var on=st.from===today() && st.to===addDays(today(),q[1]);
+      qr.appendChild(el('button',{type:'button',class:on?'small':'small ghost',style:'min-height:32px;padding:5px 10px',onclick:function(){ st.from=today(); st.to=addDays(today(),q[1]); render(); }},[q[0]]));
+    });
+    var scope=el('select',{}); [['this','This unit ('+propShort(pid)+')'],['all','All units']].forEach(function(o){var op=el('option',{value:o[0]},[o[1]]); if(o[0]===st.scope) op.selected=true; scope.appendChild(op);});
+    scope.addEventListener('change',function(){st.scope=scope.value;render();});
+    g.appendChild(pField('Apply to',scope));
+    box.appendChild(g);
+    box.appendChild(qr);
+    // days of week
+    var names=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    var dRow=el('div',{style:'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px'},[el('span',{style:'font-size:11px;color:var(--ink-soft);margin-right:4px'},['Days'])]);
+    names.forEach(function(n,k){
+      var on=st.days.indexOf(k)>-1;
+      dRow.appendChild(el('button',{type:'button',class:on?'small':'small ghost',style:'min-height:32px;padding:5px 10px',onclick:function(){ var i=st.days.indexOf(k); if(i>-1) st.days.splice(i,1); else st.days.push(k); render(); }},[n]));
+    });
+    [['All',[0,1,2,3,4,5,6]],['Sun\u2013Thu',[0,1,2,3,4]],['Fri–Sat',[5,6]]].forEach(function(q){
+      dRow.appendChild(el('button',{type:'button',class:'small ghost',style:'min-height:32px;padding:5px 10px;border-style:dashed',onclick:function(){ st.days=q[1].slice(); render(); }},[q[0]]));
+    });
+    box.appendChild(dRow);
+    // action
+    var a=el('div',{style:'display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:flex-end'});
+    var act=el('select',{});
+    [['fixed','Set a fixed price (₱)'],['pctUp','Suggested price + %'],['pctDown','Suggested price − %'],['amtUp','Suggested price + ₱'],['amtDown','Suggested price − ₱'],['suggest','Use the suggested price (remove my prices)']].forEach(function(o){var op=el('option',{value:o[0]},[o[1]]); if(o[0]===st.action) op.selected=true; act.appendChild(op);});
+    act.addEventListener('change',function(){st.action=act.value;render();});
+    a.appendChild(el('div',{class:'field',style:'display:flex;flex-direction:column;gap:5px;flex:2 1 220px'},[el('label',{style:'font-size:11px;color:var(--ink-soft)'},['What to do']),act]));
+    if(st.action!=='suggest'){
+      var vI=el('input',{type:'number',inputmode:'decimal',placeholder:st.action==='fixed'?'e.g. 1800':(st.action.indexOf('pct')===0?'e.g. 10':'e.g. 200')});
+      vI.value=st.value; vI.addEventListener('input',function(){st.value=vI.value; updPreview();});
+      a.appendChild(pField(st.action==='fixed'?'Price ₱':(st.action.indexOf('pct')===0?'Percent':'Amount ₱'),vI));
+    }
+    box.appendChild(a);
+    var pv=el('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:10px;line-height:1.5'});
+    box.appendChild(pv);
+    function targets(){
+      var units=st.scope==='all'?props.map(function(p){return p.id;}):[pid], out=[];
+      if(!st.from||!st.to||st.to<st.from) return out;
+      var n=daysBetween(st.from,st.to);
+      units.forEach(function(u){
+        for(var i=0;i<=n && i<400;i++){
+          var d=addDays(st.from,i); if(d<today()) continue;
+          if(st.days.indexOf(new Date(d+'T00:00:00').getDay())===-1) continue;
+          if(bookedOn(u,d)) continue;
+          out.push({pid:u,d:d});
+        }
+      });
+      return out;
+    }
+    function newPrice(t){
+      var v=Number(st.value), sg=suggestPrice(t.pid,t.d).price, r=pSettings(t.pid).roundTo||1, p;
+      if(st.action==='suggest') return null;
+      if(st.action==='fixed') p=v;
+      else if(!sg) return undefined;
+      else if(st.action==='pctUp') p=sg*(1+v/100);
+      else if(st.action==='pctDown') p=sg*(1-v/100);
+      else if(st.action==='amtUp') p=sg+v;
+      else p=sg-v;
+      if(st.action!=='fixed') p=Math.round(p/r)*r;
+      return p>0?Math.round(p):undefined;
+    }
+    function updPreview(){
+      var ts=targets();
+      if(st.action!=='suggest' && !(Number(st.value)>0)){ pv.textContent=ts.length+' open night'+(ts.length===1?'':'s')+' selected (booked nights are skipped). Enter a value to see the new prices.'; return; }
+      var ex=ts.slice(0,4).map(function(t){ var np=newPrice(t); return (st.scope==='all'?propShort(t.pid)+' ':'')+weekdayShort(t.d)+' '+shortDate(t.d)+' → '+(np===null?fmt(suggestPrice(t.pid,t.d).price)+' (suggested)':(np?fmt(np):'skip — no suggestion')); });
+      pv.textContent=ts.length+' open night'+(ts.length===1?'':'s')+' will change (booked nights are skipped). '+(ex.length?'e.g. '+ex.join(' · '):'');
+    }
+    updPreview();
+    box.appendChild(el('div',{style:'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap'},[
+      el('button',{type:'button',onclick:function(){
+        var ts=targets();
+        if(!ts.length){ alert('No open nights match those dates and days.'); return; }
+        if(st.action!=='suggest' && !(Number(st.value)>0)){ alert('Enter a value first.'); return; }
+        if(!confirm('Change '+ts.length+' night'+(ts.length===1?'':'s')+'? You can press Undo afterwards.')) return;
+        pushUndoSnapshot();
+        var n=0;
+        ts.forEach(function(t){
+          var k=pKey(t.pid,t.d), np=newPrice(t);
+          if(np===null){ if(pricing.overrides[k]){ delete pricing.overrides[k]; n++; } }
+          else if(np){ pricing.overrides[k]=np; n++; }
+        });
+        savePricing(); render();
+        setTimeout(function(){ alert(n+' night'+(n===1?'':'s')+' updated. The Airbnb / Booking ticks show which still need changing on each site.'); },50);
+      }},['Apply to '+targets().length+' nights'])
+    ]));
+    panel.appendChild(box);
+  }
+
   function renderPricingCalendar(panel){
     var pid=pricingProp, s=pSettings(pid), t=today();
     var daysSel=el('select',{});
-    [14,30,60,90].forEach(function(n){ var o=el('option',{value:n},[n+' days']); if(n===pricingDays) o.selected=true; daysSel.appendChild(o); });
+    [14,30,60,90,180].forEach(function(n){ var o=el('option',{value:n},[n===180?'6 months':n+' days']); if(n===pricingDays) o.selected=true; daysSel.appendChild(o); });
     daysSel.addEventListener('change',function(){ pricingDays=Number(daysSel.value); render(); });
     panel.appendChild(el('div',{style:'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px'},[
       pField('Property',propPicker(pid,function(v){pricingProp=v;render();})), pField('Show',daysSel)
@@ -3986,6 +4405,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       savePricing(); render();
     }},['Clear my prices']));
     panel.appendChild(actions);
+    renderBulkEdit(panel,pid);
 
     var list=el('div',{style:'border-top:1px solid var(--line)'});
     var lastMonth='';
@@ -4194,12 +4614,14 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
       ]),
       el('div',{style:'display:flex;gap:6px;flex-wrap:wrap'},[
         el('button',{class:'small ghost',type:'button',onclick:function(){ syncMarket(false); }},[marketBusy?'Loading…':'Refresh']),
-        el('button',{class:'small',type:'button',onclick:function(){ requestMarketCheck([pid],'empty nights'); }},['Request a check for '+propShort(pid)])
+        (function(){ var isPending=(m.requests||[]).some(function(r){return r.status==='pending' && (r.units||'').split(' | ')[0]===propShort(pid);});
+          var b=el('button',{class:isPending?'small ghost':'small',type:'button',onclick:function(){ if(isPending) return; b.disabled=true; b.textContent='Sending\u2026'; requestMarketCheck([pid],'empty nights'); }},[isPending?'\u2713 Check requested':'Request a check for '+propShort(pid)]);
+          if(isPending) b.disabled=true; return b; })()
       ])
     ]));
     if(marketMsg) card.appendChild(el('div',{style:'font-size:12px;color:var(--accent);margin-bottom:8px'},[marketMsg]));
-    var pending=(m.requests||[]).filter(function(r){return r.status==='pending' && (r.units||'').indexOf(propShort(pid))>-1;});
-    if(pending.length) card.appendChild(el('div',{style:'font-size:12px;color:var(--amber);margin-bottom:8px'},['⏳ Check requested '+pending[0].requestedAt.slice(0,16).replace('T',' ')+' — waiting for Claude’s next run']));
+    var pending=(m.requests||[]).filter(function(r){return r.status==='pending' && (r.units||'').split(' | ')[0]===propShort(pid);});
+    if(pending.length) card.appendChild(el('div',{style:'font-size:12px;color:var(--amber);margin-bottom:8px'},['⏳ Check requested '+pending[0].requestedAt.slice(0,16).replace('T',' ')+' UTC — Claude checks every hour from 7 am to 10 pm; tap Refresh in a while']));
     if(st.count){
       var mine=finalPrice(pid,nextDow(2)).price;
       card.appendChild(el('div',{class:'metrics',style:'padding:4px 0 10px;border-bottom:none'},[
@@ -4230,7 +4652,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     }else if(!m.lastFetch){
       card.appendChild(el('div',{style:'font-size:12px;color:var(--ink-soft)'},['Tap Refresh to load Claude’s checks (needs the version '+SCRIPT_VERSION+' Google script).']));
     }
-    card.appendChild(el('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:10px;line-height:1.5'},['Claude searches public listing and price-comparison pages for units near yours with the same size and guest count, every Monday morning plus whenever you request a check. Prices are usually “starting from” prices, not the exact price for one night — use them to set your base, and the manual check below for important dates. Which units Claude checks is set in the “Units to compare” sheet in your Drive folder “Dashboard – Competitor Prices”.']));
+    card.appendChild(el('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:10px;line-height:1.5'},['Claude searches public listing and price-comparison pages for units near yours with the same size and guest count, every Monday morning, plus within about an hour (7 am to 10 pm) whenever you request a check. Prices are usually “starting from” prices, not the exact price for one night — use them to set your base, and the manual check below for important dates. Which units Claude checks is set in the “Units to compare” sheet in your Drive folder “Dashboard – Competitor Prices”.']));
     panel.appendChild(card);
   }
 
@@ -4527,6 +4949,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
 
   function render(){
     _nightIdx=null;
+    var _dr=document.getElementById('night-drawer'); if(_dr && !(activeTab==='pricing' && pricingView==='multi' && mcSel)) _dr.remove();
     var root=document.getElementById('app');
     root.innerHTML='';
     if(!loaded){root.appendChild(el('div',{class:'empty'},['Loading\u2026']));return;}

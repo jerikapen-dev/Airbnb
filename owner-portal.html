@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Owner Report</title>
+<title>MJP Property Management — Owner Report</title>
 <style>
   :root{
     --paper:#FBFBFA; --paper-raised:#FFFFFF; --ink:#1C1C1A; --ink-soft:#8C8C86; --muted:#8C8C86;
@@ -82,6 +82,7 @@
   function renderLogin(prefill, errorMsg){
     app.innerHTML='';
     var wrap=el('div',{style:'max-width:380px;margin:60px auto;'});
+    wrap.appendChild(el('div',{style:'font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:6px'},['MJP Property Management']));
     wrap.appendChild(el('div',{style:'font-family:Georgia,serif;font-size:22px;margin-bottom:4px'},['Owner Report']));
     wrap.appendChild(el('div',{style:'font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5'},['Enter the username and PIN given to you by your property manager.']));
     var userInp=el('input',{placeholder:'Username',value:(prefill&&prefill.u)||''});
@@ -114,6 +115,7 @@
     var data=months.find(function(m){return m.month===selectedMonth;}) || months[0];
     var r=data.report||{};
     var wrap=el('div',{});
+    wrap.appendChild(el('div',{style:'font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:6px'},['MJP Property Management \u00b7 Owner report']));
     wrap.appendChild(el('div',{style:'font-family:Georgia,serif;font-size:20px;margin-bottom:2px'},[data.label||data.ownerName||'Owner report']));
 
     if(months.length>1){
