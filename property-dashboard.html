@@ -175,6 +175,37 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
   .drawer{top:auto;width:100%;height:78vh;border-left:none;border-top:1px solid var(--line);border-radius:16px 16px 0 0}
   .mc .mc-unit{min-width:110px;max-width:120px;padding:6px 8px}
 }
+
+.mg-help{font-size:12px;color:var(--ink-soft);margin-bottom:12px}
+.mg-wrap{display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:22px}
+.mg-month{background:var(--paper-raised);border:1px solid var(--line);border-radius:var(--radius);padding:14px 14px 16px}
+.mg-title{font-family:'Fraunces',serif;font-size:17px;font-weight:500;margin:0 0 10px 2px}
+.mg-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:0}
+.mg-dow{font-size:10.5px;color:var(--ink-soft);text-align:center;padding:4px 0 8px;letter-spacing:.04em}
+.mg-cell{min-height:70px;border:1px solid var(--line-soft);margin:-1px 0 0 -1px;padding:6px 6px 5px;cursor:pointer;position:relative;background:#fff;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.mg-cell:hover{background:var(--accent-l)}
+.mg-empty{background:transparent;border-color:transparent;cursor:default}
+.mg-empty:hover{background:transparent}
+.mg-past{background:var(--line-soft);cursor:default;color:#C4C3BD}
+.mg-past:hover{background:var(--line-soft)}
+.mg-num{font-size:12px;font-weight:500}
+.mg-today{background:var(--ink);color:#fff;border-radius:10px;padding:0 6px;align-self:flex-start}
+.mg-price{font-size:13.5px;font-weight:500;margin-top:auto}
+.mg-mine{color:var(--teal-dark);font-weight:700}
+.mg-manual{box-shadow:inset 0 0 0 1.5px var(--accent)}
+.mg-sub{font-size:10px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mg-evtxt{color:var(--amber)}
+.mg-event{box-shadow:inset 0 -3px 0 var(--amber)}
+.mg-behind:after{content:'';position:absolute;top:7px;right:7px;width:6px;height:6px;border-radius:50%;background:var(--rust)}
+.mg-booked{background:var(--accent);color:#fff;border-color:var(--accent)}
+.mg-booked:hover{background:var(--teal-dark)}
+.mg-booked .mg-num{color:rgba(255,255,255,.75)}
+.mg-guest{font-size:11px;font-weight:600;margin-top:auto;white-space:nowrap}
+.mg-bstart{border-top-left-radius:10px;border-bottom-left-radius:10px}
+.mg-bend{border-top-right-radius:10px;border-bottom-right-radius:10px}
+.mg-blocked{background:repeating-linear-gradient(45deg,#E4E3DE 0 4px,#F3F2EF 4px 8px)}
+.mg-sel{outline:2.5px solid var(--ink);outline-offset:-2px;z-index:1}
+@media (max-width:520px){ .mg-wrap{grid-template-columns:1fr} .mg-cell{min-height:58px;padding:4px} .mg-price{font-size:11.5px} .mg-sub{display:none} .mg-month{padding:10px 6px} }
 @media print{
   body{background:#fff}
   #app{max-width:none}
@@ -4150,7 +4181,7 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
         el('div',{class:'dr-eyebrow'},[propShort(pid)]),
         el('div',{class:'dr-title'},[new Date(d+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})])
       ]),
-      el('button',{type:'button',class:'small ghost',onclick:function(){ mcSel=null; dr.remove(); render(); }},['✕'])
+      el('button',{type:'button',class:'small ghost',onclick:function(){ mcSel=null; ucRange=null; ucAnchor=null; dr.remove(); render(); }},['✕'])
     ]));
     var body=el('div',{class:'dr-body'});
     if(cs.kind==='booked'){
@@ -4347,13 +4378,128 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
     panel.appendChild(box);
   }
 
+  // ---- Airbnb-style month calendar for one unit ----
+  var ucMode='grid', ucRange=null, ucAnchor=null;
+  function inRange(d){ return ucRange && d>=ucRange.from && d<=ucRange.to; }
+  function renderMonthGrid(panel,pid){
+    var t=today();
+    panel.appendChild(el('div',{class:'mg-help'},['Tap a day to change its price. Tap a second day to select a range and set all of those nights at once.']));
+    var months=Math.max(2,Math.ceil(pricingDays/30));
+    var first=new Date(t.slice(0,7)+'-01T00:00:00');
+    var wrap=el('div',{class:'mg-wrap'});
+    for(var m=0;m<months;m++){
+      var md=new Date(first.getFullYear(),first.getMonth()+m,1);
+      var y=md.getFullYear(), mo=md.getMonth(), dim=new Date(y,mo+1,0).getDate(), lead=md.getDay();
+      var mEl=el('div',{class:'mg-month'});
+      mEl.appendChild(el('div',{class:'mg-title'},[md.toLocaleDateString('en-US',{month:'long',year:'numeric'})]));
+      var grid=el('div',{class:'mg-grid'});
+      ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(function(w){ grid.appendChild(el('div',{class:'mg-dow'},[w])); });
+      for(var b=0;b<lead;b++) grid.appendChild(el('div',{class:'mg-cell mg-empty'}));
+      for(var dd=1;dd<=dim;dd++){
+        var d=y+'-'+(mo<9?'0':'')+(mo+1)+'-'+(dd<10?'0':'')+dd;
+        grid.appendChild(monthCell(pid,d,t));
+      }
+      mEl.appendChild(grid);
+      wrap.appendChild(mEl);
+    }
+    panel.appendChild(wrap);
+    if(ucRange && ucRange.pid===pid){ if(ucRange.from===ucRange.to) renderNightDrawer(pid,ucRange.from); else renderRangeDrawer(pid,ucRange.from,ucRange.to); }
+  }
+  function monthCell(pid,d,t){
+    var past=d<t, cls='mg-cell';
+    var num=el('div',{class:'mg-num'+(d===t?' mg-today':'')},[String(Number(d.slice(8)))]);
+    if(past){ return el('div',{class:cls+' mg-past'},[num]); }
+    var cs=cellState(pid,d), kids=[num];
+    if(cs.kind==='booked'){
+      cls+=' mg-booked';
+      var start=(cs.bk.checkIn===d || new Date(d+'T00:00:00').getDay()===0 || d===t);
+      if(start) kids.push(el('div',{class:'mg-guest'},[(cs.bk.guest||'Booked').split(' ').slice(0,2).join(' ')]));
+      if(cs.bk.checkIn===d) cls+=' mg-bstart';
+      if(addDays(d,1)===cs.bk.checkOut) cls+=' mg-bend';
+    } else if(cs.kind==='blocked'){
+      cls+=' mg-blocked';
+      kids.push(el('div',{class:'mg-sub'},['Blocked']));
+    } else {
+      var sg=suggestPrice(pid,d).price;
+      kids.push(el('div',{class:'mg-price mono'+(cs.manual?' mg-mine':'')},[cs.price?fmt(cs.price):'—']));
+      if(cs.manual && sg && sg!==cs.price) kids.push(el('div',{class:'mg-sub mono'},['sugg. '+fmt(sg)]));
+      else if(cs.event) kids.push(el('div',{class:'mg-sub mg-evtxt'},[eventsOn(d)[0].name.split(' (')[0]]));
+      if(cs.manual) cls+=' mg-manual';
+      if(cs.behind) cls+=' mg-behind';
+      if(cs.event) cls+=' mg-event';
+    }
+    if(inRange(d) && ucRange.pid===pid) cls+=' mg-sel';
+    return el('div',{class:cls,onclick:function(){
+      if(ucAnchor && ucAnchor.pid===pid && ucRange && ucRange.from===ucRange.to && d!==ucAnchor.d){
+        var a=ucAnchor.d<d?ucAnchor.d:d, z=ucAnchor.d<d?d:ucAnchor.d;
+        ucRange={pid:pid,from:a,to:z}; ucAnchor=null;
+      } else if(ucRange && ucRange.from===d && ucRange.to===d){
+        ucRange=null; ucAnchor=null;
+      } else {
+        ucRange={pid:pid,from:d,to:d}; ucAnchor={pid:pid,d:d};
+      }
+      mcSel=ucRange&&ucRange.from===ucRange.to?{pid:pid,d:d}:null;
+      render();
+    }},kids);
+  }
+  function renderRangeDrawer(pid,from,to){
+    var old=document.getElementById('night-drawer'); if(old) old.remove();
+    var s=pSettings(pid), nights=[], sum=0;
+    for(var d=from; d<=to; d=addDays(d,1)){ var cs=cellState(pid,d); if(cs.kind==='open'){ nights.push(d); sum+=cs.price||0; } }
+    var dr=el('div',{id:'night-drawer',class:'drawer'});
+    var fmtD=function(x){return new Date(x+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'});};
+    dr.appendChild(el('div',{class:'dr-head'},[
+      el('div',{},[el('div',{class:'dr-eyebrow'},[propShort(pid)]),el('div',{class:'dr-title'},[fmtD(from)+' – '+fmtD(to)])]),
+      el('button',{type:'button',class:'small ghost',onclick:function(){ ucRange=null; ucAnchor=null; mcSel=null; dr.remove(); render(); }},['✕'])
+    ]));
+    var body=el('div',{class:'dr-body'});
+    var total=daysBetween(from,to)+1;
+    body.appendChild(drRow('Nights selected',String(total)));
+    body.appendChild(drRow('Open nights (will change)',String(nights.length)));
+    if(nights.length) body.appendChild(drRow('Average price now',fmt(sum/nights.length)));
+    var sgAvg=nights.length?nights.reduce(function(a,x){return a+(suggestPrice(pid,x).price||0);},0)/nights.length:0;
+    if(sgAvg) body.appendChild(drRow('Average suggested',fmt(sgAvg)));
+    if(!nights.length){ body.appendChild(el('div',{class:'dr-note'},['All nights in this range are booked or blocked.'])); dr.appendChild(body); document.body.appendChild(dr); return; }
+    body.appendChild(el('div',{class:'dr-sec'},['Set one price for all open nights']));
+    var inp=el('input',{type:'number',inputmode:'decimal',placeholder:sgAvg?String(Math.round(sgAvg)):'Price',style:'font-size:18px'});
+    body.appendChild(inp);
+    body.appendChild(el('button',{type:'button',style:'width:100%;margin-top:8px',onclick:function(){
+      var v=Number(inp.value); if(!(v>0)){ alert('Enter a price.'); return; }
+      pushUndoSnapshot(); nights.forEach(function(x){ pricing.overrides[pKey(pid,x)]=v; }); savePricing(); ucRange=null; ucAnchor=null; render();
+    }},['Save for '+nights.length+' night'+(nights.length>1?'s':'')]));
+    body.appendChild(el('div',{class:'dr-sec'},['Or adjust the suggested prices']));
+    var q=el('div',{style:'display:flex;gap:6px;flex-wrap:wrap'});
+    [-15,-10,-5,5,10,15].forEach(function(pc){
+      q.appendChild(el('button',{type:'button',class:'small ghost',onclick:function(){
+        pushUndoSnapshot(); var r=s.roundTo||1;
+        nights.forEach(function(x){ var sg=suggestPrice(pid,x).price; if(sg) pricing.overrides[pKey(pid,x)]=Math.round(sg*(1+pc/100)/r)*r; });
+        savePricing(); ucRange=null; ucAnchor=null; render();
+      }},['Suggested '+(pc>0?'+':'')+pc+'%']));
+    });
+    body.appendChild(q);
+    body.appendChild(el('button',{type:'button',class:'ghost',style:'width:100%;margin-top:10px',onclick:function(){
+      pushUndoSnapshot(); nights.forEach(function(x){ delete pricing.overrides[pKey(pid,x)]; }); savePricing(); ucRange=null; ucAnchor=null; render();
+    }},['Use the suggested prices']));
+    body.appendChild(el('div',{class:'dr-sec'},['After updating Airbnb / Booking.com']));
+    var chs=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap'});
+    CHANNELS.filter(function(c){return s.channels[c[0]];}).forEach(function(c){
+      chs.appendChild(el('button',{type:'button',class:'small ghost',onclick:function(){ nights.forEach(function(x){ var fp=finalPrice(pid,x).price; if(fp) markApplied(pid,x,c[0],fp,true); }); savePricing(); render(); }},['✓ Mark all updated on '+c[1]]));
+    });
+    body.appendChild(chs);
+    body.appendChild(el('button',{type:'button',class:'ghost',style:'width:100%;margin-top:16px',onclick:function(){
+      if(!confirm('Block '+fmtD(from)+' – '+fmtD(to)+'?')) return; ucRange=null; ucAnchor=null; addBlock(pid,from,addDays(to,1),'').then(function(){ render(); });
+    }},['Block these dates']));
+    dr.appendChild(body);
+    document.body.appendChild(dr);
+  }
+
   function renderPricingCalendar(panel){
     var pid=pricingProp, s=pSettings(pid), t=today();
     var daysSel=el('select',{});
     [14,30,60,90,180].forEach(function(n){ var o=el('option',{value:n},[n===180?'6 months':n+' days']); if(n===pricingDays) o.selected=true; daysSel.appendChild(o); });
     daysSel.addEventListener('change',function(){ pricingDays=Number(daysSel.value); render(); });
     panel.appendChild(el('div',{style:'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px'},[
-      pField('Property',propPicker(pid,function(v){pricingProp=v;render();})), pField('Show',daysSel)
+      pField('Property',propPicker(pid,function(v){pricingProp=v;ucRange=null;ucAnchor=null;mcSel=null;render();})), pField('Show',daysSel)
     ]));
 
     var base=resolveBase(pid), h=histStats(pid,90), c=compAvg(pid);
@@ -4407,6 +4553,11 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
     panel.appendChild(actions);
     renderBulkEdit(panel,pid);
 
+    panel.appendChild(el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 12px'},[
+      segControl([['grid','Calendar'],['list','List']],ucMode,function(v){ucMode=v;ucRange=null;ucAnchor=null;mcSel=null;render();}),
+      el('div',{class:'legend',style:'margin:0'},[el('span',{},[el('i',{class:'lg lg-manual'}),'Your price']),el('span',{},[el('i',{class:'lg lg-booked'}),'Booked']),el('span',{},[el('i',{class:'lg lg-blocked'}),'Blocked']),el('span',{},[el('i',{class:'lg lg-behind'}),'Channel not updated'])])
+    ]));
+    if(ucMode==='grid'){ renderMonthGrid(panel,pid); return; }
     var list=el('div',{style:'border-top:1px solid var(--line)'});
     var lastMonth='';
     dates.forEach(function(d){
@@ -4949,7 +5100,7 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
 
   function render(){
     _nightIdx=null;
-    var _dr=document.getElementById('night-drawer'); if(_dr && !(activeTab==='pricing' && pricingView==='multi' && mcSel)) _dr.remove();
+    var _dr=document.getElementById('night-drawer'); if(_dr && !(activeTab==='pricing' && ((pricingView==='multi' && mcSel) || (pricingView==='calendar' && ucRange)))) _dr.remove();
     var root=document.getElementById('app');
     root.innerHTML='';
     if(!loaded){root.appendChild(el('div',{class:'empty'},['Loading\u2026']));return;}
