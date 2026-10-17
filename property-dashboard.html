@@ -206,6 +206,18 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
 .mg-blocked{background:repeating-linear-gradient(45deg,#E4E3DE 0 4px,#F3F2EF 4px 8px)}
 .mg-sel{outline:2.5px solid var(--ink);outline-offset:-2px;z-index:1}
 @media (max-width:520px){ .mg-wrap{grid-template-columns:1fr} .mg-cell{min-height:58px;padding:4px} .mg-price{font-size:11.5px} .mg-sub{display:none} .mg-month{padding:10px 6px} }
+
+.cs-card{background:var(--paper-raised);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin-bottom:14px}
+.cs-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px}
+.cs-name{font-family:'Fraunces',serif;font-size:17px;font-weight:500}
+.cs-sub{font-size:11.5px;color:var(--ink-soft);margin-top:2px}
+.cs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.cs-item{border:1px solid var(--line-soft);border-radius:var(--radius-sm);padding:10px 12px;background:var(--paper)}
+.cs-l{font-size:11px;color:var(--ink-soft)}
+.cs-v{font-size:18px;font-weight:500;margin-top:3px}
+.cs-h{font-size:10.5px;color:var(--ink-soft);margin-top:3px}
+.cs-foot{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)}
+.cs-ch{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:1 1 240px;border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px}
 @media print{
   body{background:#fff}
   #app{max-width:none}
@@ -3850,7 +3862,7 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
 
   function normalizePricing(p){
     p=p||{};
-    return {settings:p.settings||{},events:p.events||[],comps:p.comps||[],overrides:p.overrides||{},applied:p.applied||{},seeded:!!p.seeded};
+    return {settings:p.settings||{},events:p.events||[],comps:p.comps||[],overrides:p.overrides||{},applied:p.applied||{},seeded:!!p.seeded,channelSetup:p.channelSetup||{}};
   }
   function savePricing(){ return save('pricing',pricing); }
   function starterEvents(){
@@ -3906,14 +3918,15 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
   function bookedOn(pid,d){ var m=nightIndex()[pid]; return m?m[d]:null; }
 
   function histStats(pid,days){
-    var t=today(), from=addDays(t,-days), nights=0, rev=0, stays=0, ch={};
+    var t=today(), from=addDays(t,-days), nights=0, rev=0, stays=0, ch={}, paidN=0;
     bookings.forEach(function(b){
       if(b.propertyId!==pid||!b.checkIn||b.checkIn<from||b.checkIn>=t) return;
       var n=daysBetween(b.checkIn,b.checkOut); if(n<=0) return;
       nights+=n; rev+=Number(b.amount||0); stays++;
+      if(Number(b.amount)>0) paidN+=n;
       var c=b.channel||'Other'; ch[c]=(ch[c]||0)+1;
     });
-    return {nights:nights,rev:rev,stays:stays,adr:nights?rev/nights:0,occ:days?Math.min(100,nights/days*100):0,avgStay:stays?nights/stays:0,channels:ch};
+    return {nights:nights,rev:rev,stays:stays,adr:paidN?rev/paidN:0,occ:days?Math.min(100,nights/days*100):0,avgStay:stays?nights/stays:0,channels:ch};
   }
   function compAvg(pid,forDate){
     var since=addDays(today(),-30);
@@ -3986,6 +3999,7 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
   function channelState(pid,d,ch,price){
     var a=pricing.applied[pKey(pid,d)];
     var was=a&&a[ch]?Number(a[ch]):0;
+    if(!(was && was===price) && price && coveredByDefaults(pid,d,ch,price)) return {done:true, was:price, auto:true};
     return {done:!!was && was===price, was:was};
   }
   function markApplied(pid,d,ch,price,on){
@@ -4086,6 +4100,7 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
     search.addEventListener('input',function(){ mcFilter=search.value; clearTimeout(search._t); search._t=setTimeout(render,250); });
     var right=el('div',{class:'tb-group'},[
       search,
+      el('button',{type:'button',class:'small',onclick:function(){ updState.scope='all'; openUpdateList(); }},['Update channels']),
       el('button',{type:'button',class:mcBulk?'small':'small ghost',onclick:function(){ mcBulk=!mcBulk; if(mcBulk){ bulkOpen=true; bulkState=bulkState||null; } render(); }},['Bulk edit']),
       el('button',{type:'button',class:'small ghost',onclick:function(){
         var rows=[['Unit','Date','Day','Status','Final price','Suggested','My price']];
@@ -4252,17 +4267,119 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
   }
   // ================= end PRICING WORKSPACE =================
 
+  // ---- Channel settings: one-time values to enter in Airbnb / Booking.com so most nights price themselves ----
+  function roundP(v,pid){ var r=pSettings(pid).roundTo||1; return Math.round(v/r)*r; }
+  function channelDefaults(pid){
+    var s=pSettings(pid), raw=pricing.settings[pid]||{}, b=resolveBase(pid).value;
+    if(!b) return null;
+    var base=roundP(b,pid), wk=roundP(b*(1+s.weekendPct/100),pid);
+    var min=s.min||roundP(b*0.75,pid), max=s.max||roundP(b*1.8,pid);
+    return {
+      base:base, weekend:wk, weekendPct:s.weekendPct,
+      min:min, minSuggested:!s.min, max:max, maxSuggested:!s.max,
+      weekly:(raw.weeklyDisc!==undefined&&raw.weeklyDisc!=='')?Number(raw.weeklyDisc):10,
+      monthly:(raw.monthlyDisc!==undefined&&raw.monthlyDisc!=='')?Number(raw.monthlyDisc):20,
+      lastMinDays:s.lastMinuteDays, lastMinPct:s.lastMinutePct
+    };
+  }
+  function defaultsSig(v){ return v?[v.base,v.weekend].join('|'):''; }
+  function setupFor(pid,ch){ var cs=(pricing.channelSetup||{})[pid]; return cs&&cs[ch]; }
+  function coveredByDefaults(pid,d,ch,price){
+    var su=setupFor(pid,ch); if(!su) return false;
+    var v=channelDefaults(pid); if(!v || su.sig!==defaultsSig(v)) return false;
+    var dw=new Date(d+'T00:00:00').getDay();
+    return price===((dw===5||dw===6)?v.weekend:v.base);
+  }
+  function upcomingEventRanges(pid){
+    var v=channelDefaults(pid); if(!v) return [];
+    var t=today(), horizon=addDays(t,240);
+    return pricing.events.filter(function(e){return e.end>=t && e.start<=horizon;}).sort(function(a,b){return a.start.localeCompare(b.start);}).map(function(e){
+      return {name:e.name,start:e.start<t?t:e.start,end:e.end,pct:Number(e.pct)||0,wd:roundP(v.base*(1+(Number(e.pct)||0)/100),pid),we:roundP(v.weekend*(1+(Number(e.pct)||0)/100),pid)};
+    });
+  }
+
+  function renderChannelSettings(panel){
+    panel.appendChild(pNote('Enter these once in each listing’s pricing settings. After that, ordinary weekday and weekend nights price themselves, and the dashboard only flags the exceptions — holidays, last-minute or slow-period changes, and prices you set yourself. Menu names in the Airbnb app and Booking.com extranet may differ slightly from the labels here.'));
+    var ok=0, total=0;
+    props.forEach(function(p){ CHANNELS.forEach(function(c){ if(pSettings(p.id).channels[c[0]]){ total++; var su=setupFor(p.id,c[0]), v=channelDefaults(p.id); if(su && v && su.sig===defaultsSig(v)) ok++; } }); });
+    kpiStrip(panel,[
+      ['Listings set up',ok+' / '+total,ok===total&&total?'color:var(--green)':'', ok===total&&total?'all channels match':'tap “Mark as set” after entering'],
+      ['Units without a base',String(props.filter(function(p){return !channelDefaults(p.id);}).length),'','set one in Rules & events'],
+      ['Upcoming holiday ranges',String(pricing.events.filter(function(e){return e.end>=today();}).length),'','enter these as custom date prices'],
+      ['Weekend uplift (default)',PRICING_DEFAULTS.weekendPct+'%','','change per unit in Rules']
+    ]);
+    props.forEach(function(p){
+      var v=channelDefaults(p.id), s=pSettings(p.id), raw=pricing.settings[p.id]||{};
+      var card=el('div',{class:'cs-card'});
+      card.appendChild(el('div',{class:'cs-head'},[
+        el('div',{},[el('div',{class:'cs-name'},[propShort(p.id)]),el('div',{class:'cs-sub'},[(p.type||'')+(v?' · base from '+resolveBase(p.id).source:'')])]),
+        v?el('button',{type:'button',class:'small ghost',onclick:function(){
+          var lines=[propShort(p.id)+' — pricing settings',
+            'Nightly price: '+fmt(v.base),'Weekend price (Fri, Sat): '+fmt(v.weekend),
+            'Minimum price: '+fmt(v.min),'Maximum price: '+fmt(v.max),
+            'Weekly discount: '+v.weekly+'%','Monthly discount: '+v.monthly+'%',
+            'Last-minute discount: '+v.lastMinPct+'% within '+v.lastMinDays+' days'];
+          var ev=upcomingEventRanges(p.id); if(ev.length){ lines.push('Holiday date prices:'); ev.forEach(function(e){ lines.push('  '+e.name+' '+e.start+' to '+e.end+': '+fmt(e.wd)+(e.we!==e.wd?' (Fri/Sat '+fmt(e.we)+')':'')); }); }
+          var txt=lines.join('\n');
+          if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(function(){alert('Copied — paste into Notes beside the Airbnb app.');},function(){prompt('Copy:',txt);}); else prompt('Copy:',txt);
+        }},['Copy']):null
+      ]));
+      if(!v){
+        card.appendChild(el('div',{class:'dr-note'},['No base price yet — set one in Rules & events, or request a market check.']));
+        panel.appendChild(card); return;
+      }
+      var grid=el('div',{class:'cs-grid'});
+      function item(label,val,hint,edit){ grid.appendChild(el('div',{class:'cs-item'},[el('div',{class:'cs-l'},[label]),edit||el('div',{class:'cs-v mono'},[val]),hint?el('div',{class:'cs-h'},[hint]):null])); }
+      item('Nightly price',fmt(v.base),'Sun–Thu');
+      item('Weekend price',fmt(v.weekend),'Fri & Sat · +'+v.weekendPct+'%');
+      item('Minimum price',fmt(v.min),v.minSuggested?'suggested (75% of base)':'from your rules');
+      item('Maximum price',fmt(v.max),v.maxSuggested?'suggested (180% of base)':'from your rules');
+      var wI=numInput(raw.weeklyDisc,String(v.weekly),function(x){ setSetting(p.id,'weeklyDisc',x); render(); },'70px'); wI.style.minHeight='34px'; wI.style.padding='4px 8px';
+      var mI=numInput(raw.monthlyDisc,String(v.monthly),function(x){ setSetting(p.id,'monthlyDisc',x); render(); },'70px'); mI.style.minHeight='34px'; mI.style.padding='4px 8px';
+      item('Weekly discount',null,'% off 7+ nights',el('div',{style:'display:flex;align-items:center;gap:4px'},[wI,el('span',{class:'mono'},['%'])]));
+      item('Monthly discount',null,'% off 28+ nights',el('div',{style:'display:flex;align-items:center;gap:4px'},[mI,el('span',{class:'mono'},['%'])]));
+      item('Last-minute',v.lastMinPct+'% off','within '+v.lastMinDays+' days, if your listing offers this');
+      card.appendChild(grid);
+      var ev=upcomingEventRanges(p.id);
+      if(ev.length){
+        card.appendChild(el('div',{class:'dr-sec',style:'margin-top:14px'},['Holiday date prices — enter as custom prices for these dates']));
+        ev.forEach(function(e){
+          card.appendChild(el('div',{class:'dr-row'},[
+            el('span',{style:'color:var(--ink)'},[e.name+' · '+shortDate(e.start)+(e.end!==e.start?' – '+shortDate(e.end):'')]),
+            el('span',{class:'mono'},[fmt(e.wd)+(e.we!==e.wd?' / Fri–Sat '+fmt(e.we):'')])
+          ]));
+        });
+      }
+      var foot=el('div',{class:'cs-foot'});
+      CHANNELS.filter(function(c){return s.channels[c[0]];}).forEach(function(c){
+        var su=setupFor(p.id,c[0]), cur=su && su.sig===defaultsSig(v), stale=su && !cur;
+        foot.appendChild(el('div',{class:'cs-ch'},[
+          el('div',{},[el('div',{style:'font-size:13px;font-weight:600'},[c[1]]),el('div',{class:'cs-h',style:stale?'color:var(--rust)':''},[cur?('Set on '+su.on):(stale?'Changed since '+su.on+' — update '+c[1]:'Not set up yet')])]),
+          el('button',{type:'button',class:cur?'small ghost':'small',onclick:function(){
+            pricing.channelSetup=pricing.channelSetup||{}; pricing.channelSetup[p.id]=pricing.channelSetup[p.id]||{};
+            if(cur){ delete pricing.channelSetup[p.id][c[0]]; }
+            else { if(!confirm('Mark '+propShort(p.id)+' as set up on '+c[1]+' with nightly '+fmt(v.base)+' and weekend '+fmt(v.weekend)+'?')) return; pricing.channelSetup[p.id][c[0]]={sig:defaultsSig(v),on:today()}; }
+            savePricing(); render();
+          }},[cur?'✓ Set':'Mark as set'])
+        ]));
+      });
+      card.appendChild(foot);
+      panel.appendChild(card);
+    });
+  }
+
   function renderPricing(panel){
     if(!pricing.seeded){ pricing.events=starterEvents().concat(pricing.events); pricing.seeded=true; prunePricingHistory(); savePricing(); }
     if(props.length===0){ panel.appendChild(el('div',{class:'empty'},['Add properties first, then pricing suggestions appear here.'])); return; }
     if(!pricingProp || !props.some(function(p){return p.id===pricingProp;})) pricingProp=props[0].id;
 
     renderPricingHeader(panel);
-    var views=[['multi','Multi-calendar'],['calendar','Unit calendar'],['comps','Market'],['rules','Rules & events'],['insights','Insights']];
+    var views=[['multi','Multi-calendar'],['calendar','Unit calendar'],['channels','Channel settings'],['comps','Market'],['rules','Rules & events'],['insights','Insights']];
     panel.appendChild(el('div',{class:'subnav'},[segControl(views,pricingView==='portfolio'?'multi':pricingView,function(v){pricingView=v;mcSel=null;render();})]));
 
     if(pricingView==='multi' || pricingView==='portfolio') renderMultiCalendar(panel);
     else if(pricingView==='calendar') renderPricingCalendar(panel);
+    else if(pricingView==='channels') renderChannelSettings(panel);
     else if(pricingView==='comps') renderPricingComps(panel);
     else if(pricingView==='rules') renderPricingRules(panel);
     else renderPricingInsights(panel);
@@ -4493,6 +4610,82 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
     document.body.appendChild(dr);
   }
 
+  // ---- Channel update list: groups changed nights into date ranges so each channel is updated in a few steps ----
+  var updState={ch:'airbnb',scope:'all',days:30};
+  function changeRanges(pid,ch,days){
+    var t=today(), out=[], cur=null, s=pSettings(pid);
+    if(!s.channels[ch]) return out;
+    for(var i=0;i<days;i++){
+      var d=addDays(t,i), cs=cellState(pid,d);
+      var need=cs.kind==='open' && cs.price && !channelState(pid,d,ch,cs.price).done;
+      if(need && cur && cur.price===cs.price && addDays(cur.to,1)===d){ cur.to=d; cur.n++; continue; }
+      if(cur){ out.push(cur); cur=null; }
+      if(need) cur={pid:pid,from:d,to:d,n:1,price:cs.price};
+    }
+    if(cur) out.push(cur);
+    return out;
+  }
+  function openUpdateList(){
+    var old=document.getElementById('upd-drawer'); if(old) old.remove();
+    var st=updState, chName=st.ch==='airbnb'?'Airbnb':'Booking.com';
+    var pids=st.scope==='all'?props.map(function(p){return p.id;}):[pricingProp];
+    var groups=pids.map(function(pid){ return {pid:pid,ranges:changeRanges(pid,st.ch,st.days)}; }).filter(function(g){return g.ranges.length;});
+    var totalR=0, totalN=0; groups.forEach(function(g){ g.ranges.forEach(function(r){ totalR++; totalN+=r.n; }); });
+    var fmtD=function(x){return new Date(x+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'});};
+    var dr=el('div',{id:'upd-drawer',class:'drawer',style:'z-index:60'});
+    dr.appendChild(el('div',{class:'dr-head'},[
+      el('div',{},[el('div',{class:'dr-eyebrow'},['Update list']),el('div',{class:'dr-title'},['Prices to change on '+chName])]),
+      el('button',{type:'button',class:'small ghost',onclick:function(){ dr.remove(); }},['✕'])
+    ]));
+    var body=el('div',{class:'dr-body'});
+    body.appendChild(el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px'},[
+      segControl([['airbnb','Airbnb'],['booking','Booking.com']],st.ch,function(v){st.ch=v;openUpdateList();}),
+      segControl([['all','All units'],['this',propShort(pricingProp)]],st.scope,function(v){st.scope=v;openUpdateList();}),
+      segControl([[14,'2W'],[30,'30 days'],[90,'3M'],[180,'6M']],st.days,function(v){st.days=v;openUpdateList();})
+    ]));
+    if(!totalR){
+      body.appendChild(el('div',{class:'dr-status st-booked',style:'margin-top:8px'},['✓ Everything is up to date on '+chName]));
+      dr.appendChild(body); document.body.appendChild(dr); return;
+    }
+    body.appendChild(el('div',{class:'dr-note',style:'margin:0 0 12px;line-height:1.5'},[
+      totalN+' nights grouped into '+totalR+' change'+(totalR>1?'s':'')+'. In the '+chName+' app open the calendar, select each date range, and enter the price shown — one entry per line instead of one per night.'
+    ]));
+    var lines=[];
+    groups.forEach(function(g){
+      body.appendChild(el('div',{class:'dr-sec',style:'margin-top:14px'},[propShort(g.pid)+' · '+g.ranges.length+' change'+(g.ranges.length>1?'s':'')]));
+      lines.push(propShort(g.pid));
+      g.ranges.forEach(function(r){
+        var label=fmtD(r.from)+(r.n>1?' – '+fmtD(r.to):'');
+        lines.push('  '+label+(r.n>1?' ('+r.n+' nights)':'')+': '+fmt(r.price));
+        var row=el('div',{class:'dr-row',style:'align-items:center'},[
+          el('span',{style:'color:var(--ink)'},[label+(r.n>1?'  · '+r.n+' nights':'')]),
+          el('span',{style:'display:flex;gap:8px;align-items:center'},[
+            el('span',{class:'mono',style:'font-weight:600'},[fmt(r.price)]),
+            el('button',{type:'button',class:'small ghost',style:'min-height:28px;padding:3px 9px',title:'Mark this range done',onclick:function(){
+              for(var d=r.from; d<=r.to; d=addDays(d,1)) markApplied(r.pid,d,st.ch,r.price,true);
+              savePricing(); render(); openUpdateList();
+            }},['✓'])
+          ])
+        ]);
+        body.appendChild(row);
+      });
+    });
+    var txt=chName+' price updates\n'+lines.join('\n');
+    body.appendChild(el('div',{style:'display:flex;flex-direction:column;gap:8px;margin-top:18px'},[
+      el('button',{type:'button',class:'ghost',onclick:function(){
+        if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(function(){alert('Copied. Paste into Notes and keep it beside the '+chName+' app.');},function(){prompt('Copy:',txt);});
+        else prompt('Copy:',txt);
+      }},['Copy this list']),
+      el('button',{type:'button',onclick:function(){
+        if(!confirm('Mark all '+totalN+' nights as updated on '+chName+'? Only do this after you have entered the prices there.')) return;
+        groups.forEach(function(g){ g.ranges.forEach(function(r){ for(var d=r.from; d<=r.to; d=addDays(d,1)) markApplied(r.pid,d,st.ch,r.price,true); }); });
+        savePricing(); render(); openUpdateList();
+      }},['✓ Done — mark all '+totalN+' nights updated on '+chName])
+    ]));
+    dr.appendChild(body);
+    document.body.appendChild(dr);
+  }
+
   function renderPricingCalendar(panel){
     var pid=pricingProp, s=pSettings(pid), t=today();
     var daysSel=el('select',{});
@@ -4519,6 +4712,7 @@ table.mc{border-collapse:separate;border-spacing:0;min-width:0;width:auto;font-s
     var activeCh=CHANNELS.filter(function(ch){return s.channels[ch[0]];});
 
     var actions=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px'});
+    actions.appendChild(el('button',{class:'small',type:'button',onclick:function(){ updState.scope='this'; openUpdateList(); }},['Update channels (grouped list)']));
     activeCh.forEach(function(ch){
       actions.appendChild(el('button',{class:'small ghost',type:'button',onclick:function(){
         if(!confirm('Mark every open date shown as already updated on '+ch[1]+' at the current price?')) return;
