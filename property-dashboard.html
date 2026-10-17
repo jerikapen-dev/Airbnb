@@ -4257,7 +4257,7 @@ button:disabled{opacity:.35;cursor:default;pointer-events:none}
     if(!compCheckDate || compCheckDate<today()) compCheckDate=nextDow(6);
 
     panel.appendChild(el('div',{style:'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:6px'},[
-      pField('Your unit',propPicker(pid,function(v){pricingCompProp=v;compQuickRows=null;render();})),
+      pField('Your unit',propPicker(pid,function(v){pricingCompProp=v;compQuickRows=null;marketMsg='';render();})),
       (function(){ var i=el('input',{type:'date',value:compCheckDate}); i.addEventListener('change',function(){ if(i.value){compCheckDate=i.value;render();} }); return pField('Night to compare',i); })()
     ]));
     var qd=el('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px'});
